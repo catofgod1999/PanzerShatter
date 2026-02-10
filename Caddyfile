@@ -1,0 +1,22 @@
+:80 {
+  root * /usr/share/caddy
+  encode zstd gzip
+  file_server
+
+  @immutableAssets {
+    path /assets/*
+  }
+  header @immutableAssets Cache-Control "public, max-age=31536000, immutable"
+
+  @audioFiles {
+    path /sfx/*
+  }
+  header @audioFiles Cache-Control "public, max-age=31536000, immutable"
+
+  @html {
+    path *.html /
+  }
+  header @html Cache-Control "public, max-age=0, must-revalidate"
+
+  try_files {path} /index.html
+}

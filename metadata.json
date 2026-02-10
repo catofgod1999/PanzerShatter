@@ -1,0 +1,5 @@
+{
+  "name": "炙热金属",
+  "description": "A high-performance 2D tank shooter featuring structural destruction and tactical combat. Engineered for Tauri/Desktop deployment with optimized Phaser logic.",
+  "requestFramePermissions": []
+}
