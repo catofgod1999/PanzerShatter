@@ -17,6 +17,8 @@ export class MenuScene extends Phaser.Scene {
     private loadOverlay?: Phaser.GameObjects.Container;
     private loadOverlayUnsubProgress?: () => void;
     private loadOverlayRunning = false;
+    private loadOverlayFill?: Phaser.GameObjects.Rectangle;
+    private loadOverlayInfo?: Phaser.GameObjects.Text;
 
     constructor() {
         super('MenuScene');
@@ -64,6 +66,8 @@ export class MenuScene extends Phaser.Scene {
             try { this.loadOverlay.destroy(true); } catch {}
         }
         this.loadOverlay = undefined;
+        this.loadOverlayFill = undefined;
+        this.loadOverlayInfo = undefined;
         this.loadOverlayRunning = false;
     }
 
@@ -116,6 +120,8 @@ export class MenuScene extends Phaser.Scene {
         updateProgress(0, 1);
         this.loadOverlayUnsubProgress = SoundManager.onSessionAudioPackProgress(updateProgress);
         this.loadOverlay = container;
+        this.loadOverlayFill = fill;
+        this.loadOverlayInfo = info;
         return container;
     }
 
@@ -132,8 +138,9 @@ export class MenuScene extends Phaser.Scene {
                 const overlay = this.loadOverlay;
                 const updateP0Progress = (loaded: number, total: number) => {
                     if (!overlay?.active) return;
-                    const fill = overlay.list[4] as Phaser.GameObjects.Rectangle;
-                    const info = overlay.list[5] as Phaser.GameObjects.Text;
+                    const fill = this.loadOverlayFill;
+                    const info = this.loadOverlayInfo;
+                    if (!fill || !info) return;
                     const w = this.scale.width;
                     const barW = Phaser.Math.Clamp(Math.round(w * 0.56), 300, 680);
                     const safeTotal = Math.max(1, total);
