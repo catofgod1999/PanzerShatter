@@ -286,6 +286,7 @@ export class Tank {
   private lastTrajectoryTurretAngle = Number.NaN;
   private lastTrajectoryShell: ShellType = ShellType.HE;
   private lastTrajectoryMode = 0;
+  private targetTurretAngleFiltered = Number.NaN;
   
   // Audio state
   private wasMoving = false;
@@ -2071,7 +2072,13 @@ export class Tank {
     }
 
     const spec = SPECS[this.type];
-    this.currentTurretAngle = Phaser.Math.Angle.RotateTo(this.currentTurretAngle, this.targetTurretAngle, spec.traverseSpeed);
+    const sceneAny = this.scene as any;
+    const mobileAimAssist = !!(this.scene.sys.game.device.os.android || this.scene.sys.game.device.os.iOS || sceneAny?.aimWorldOverrideActive === true);
+    if (!Number.isFinite(this.targetTurretAngleFiltered)) this.targetTurretAngleFiltered = this.targetTurretAngle;
+    const filterAlpha = mobileAimAssist ? 0.36 : 0.52;
+    this.targetTurretAngleFiltered = Phaser.Math.Angle.RotateTo(this.targetTurretAngleFiltered, this.targetTurretAngle, filterAlpha);
+    const traverseStep = mobileAimAssist ? Math.max(spec.traverseSpeed, 0.5) : spec.traverseSpeed;
+    this.currentTurretAngle = Phaser.Math.Angle.RotateTo(this.currentTurretAngle, this.targetTurretAngleFiltered, traverseStep);
 
     this.syncLayers();
 

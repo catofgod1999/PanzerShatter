@@ -22,16 +22,18 @@ export class MenuScene extends Phaser.Scene {
         super('MenuScene');
     }
 
+    private prewarmMenuEntryAudio() {
+        if (!this.menuAudio) this.menuAudio = new SoundManager(this as any);
+        if (this.menuPrewarmed) return;
+        this.menuPrewarmed = true;
+        this.menuAudio.prewarmFolders(['bgm/menu/main_menu/sfx'], 1, 2);
+    }
+
     private startMenuBgm() {
         if ((this.sound as any)?.locked) return;
         const ctx = (this.sound as any)?.context as AudioContext | undefined;
         if (ctx && ctx.state === 'suspended') return;
-        if (!this.menuAudio) this.menuAudio = new SoundManager(this as any);
-        if (!this.menuPrewarmed) {
-            this.menuPrewarmed = true;
-            this.menuAudio.prewarmCritical();
-            this.menuAudio.prewarmFolders(['bgm/menu/main_menu/sfx'], 1, 2);
-        }
+        this.prewarmMenuEntryAudio();
         this.menuAudio.startLoop(this.menuBgmLoopId, 'bgm/menu/main_menu/sfx', {
             volume: 0.62,
             fadeInMs: 480,
@@ -90,7 +92,7 @@ export class MenuScene extends Phaser.Scene {
             stroke: '#000000',
             strokeThickness: 5
         }).setOrigin(0.5);
-        const hint = this.add.text(w * 0.5, h * 0.5 + 72, '首次进入会完整加载；本次页面会话后续不再重复', {
+        const hint = this.add.text(w * 0.5, h * 0.5 + 72, '首次进入会加载部分音效，随机音效采用分阶段加载策略，确保首次体验无延迟', {
             fontSize: '16px',
             color: '#9ca8bb',
             stroke: '#000000',
@@ -126,7 +128,35 @@ export class MenuScene extends Phaser.Scene {
         try {
             if (!SoundManager.isSessionAudioPackReady()) {
                 this.ensureLoadOverlay();
-                await this.menuAudio.ensureSessionAudioPack({ concurrency: 5 });
+                
+                const overlay = this.loadOverlay;
+                const updateP0Progress = (loaded: number, total: number) => {
+                    if (!overlay?.active) return;
+                    const fill = overlay.list[4] as Phaser.GameObjects.Rectangle;
+                    const info = overlay.list[5] as Phaser.GameObjects.Text;
+                    const w = this.scale.width;
+                    const barW = Phaser.Math.Clamp(Math.round(w * 0.56), 300, 680);
+                    const safeTotal = Math.max(1, total);
+                    const ratio = Phaser.Math.Clamp(loaded / safeTotal, 0, 1);
+                    fill.width = Math.max(0, Math.round((barW - 4) * ratio));
+                    const pct = Math.round(ratio * 100);
+                    if (total <= 0) {
+                        info.setText('准备中...');
+                    } else {
+                        info.setText(`${pct}% (${loaded}/${total})`);
+                    }
+                };
+                
+                console.log('[MenuScene] Starting P0 audio loading...');
+                await this.menuAudio.ensureSessionAudioPack({
+                    priority: 'P0',
+                    concurrency: 5,
+                    onProgress: (loaded, total) => {
+                        console.log(`[MenuScene] P0 Progress: ${loaded}/${total}`);
+                        updateP0Progress(loaded, total);
+                    }
+                });
+                console.log('[MenuScene] P0 audio loading completed');
             }
             this.destroyLoadOverlay();
             this.cameras.main.fade(500, 0, 0, 0);
@@ -142,6 +172,7 @@ export class MenuScene extends Phaser.Scene {
     }
 
     create() {
+        this.prewarmMenuEntryAudio();
         if (!(this.sound as any)?.locked) this.startMenuBgm();
         this.onMenuBgmUnlock = () => this.startMenuBgm();
         this.sound.once('unlocked', this.onMenuBgmUnlock, this);

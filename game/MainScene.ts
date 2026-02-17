@@ -402,6 +402,12 @@ export class MainScene extends Phaser.Scene {
     this.particles = new ParticleSystems(this);
     this.audio = new SoundManager(this);
     this.time.delayedCall(0, () => this.audio.prewarmCritical());
+    this.time.delayedCall(800, () => {
+      this.audio?.ensureSessionAudioPack({ priority: 'P1', concurrency: 2 }).catch(() => {});
+      this.time.delayedCall(10000, () => {
+        this.audio?.ensureSessionAudioPack({ priority: 'P2', concurrency: 2 }).catch(() => {});
+      });
+    });
     this.forestBgmCurrent = null;
     this.forestBgmActiveLoopId = null;
     this.forestBgmCurrentFolder = null;

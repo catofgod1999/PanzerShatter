@@ -119,7 +119,7 @@ const App: React.FC = () => {
   const [aimSensitivity, setAimSensitivity] = useState<number>(() => {
     try {
       const raw = Number.parseFloat(window.localStorage.getItem(aimSensitivityKey) ?? '');
-      if (Number.isFinite(raw)) return Math.round(Math.min(2.0, Math.max(0.5, raw)) * 100) / 100;
+      if (Number.isFinite(raw)) return Math.round(Math.min(2.5, Math.max(0.35, raw)) * 100) / 100;
     } catch {}
     return 1;
   });
@@ -315,7 +315,7 @@ const App: React.FC = () => {
   }, [uiButtonScale, uiButtonScaleKey]);
 
   useEffect(() => {
-    const next = Math.round(Math.min(2.0, Math.max(0.5, aimSensitivity)) * 100) / 100;
+    const next = Math.round(Math.min(2.5, Math.max(0.35, aimSensitivity)) * 100) / 100;
     try { window.localStorage.setItem(aimSensitivityKey, next.toFixed(2)); } catch {}
     window.dispatchEvent(new CustomEvent('panzer-aim-sensitivity', { detail: { value: next } }));
   }, [aimSensitivity, aimSensitivityKey]);
@@ -1181,19 +1181,19 @@ const App: React.FC = () => {
                  <span>瞄准灵敏度</span>
                  <span className="font-mono">{aimSensitivity.toFixed(2)}x</span>
                </div>
-               <input
-                 type="range"
-                 min={0.5}
-                 max={2.0}
-                 step={0.05}
-                 value={aimSensitivity}
-                 onChange={(e) => {
-                   const raw = Number.parseFloat(e.target.value);
-                   const next = Math.round(Math.min(2.0, Math.max(0.5, raw)) * 100) / 100;
-                   setAimSensitivity(next);
-                 }}
-                 className="w-full accent-yellow-500"
-               />
+                <input
+                  type="range"
+                  min={0.35}
+                  max={2.5}
+                  step={0.05}
+                  value={aimSensitivity}
+                  onChange={(e) => {
+                    const raw = Number.parseFloat(e.target.value);
+                    const next = Math.round(Math.min(2.5, Math.max(0.35, raw)) * 100) / 100;
+                    setAimSensitivity(next);
+                  }}
+                  className="w-full accent-yellow-500"
+                />
              </div>
 
              {isAndroid && (

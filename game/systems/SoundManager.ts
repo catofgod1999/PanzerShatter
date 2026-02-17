@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import type { MainScene } from '../MainScene';
 import sfxManifest from 'virtual:sfx-manifest';
 import { MIXER_TRACKS } from './AudioMixerTable';
+import { AUDIO_LOADING_RULES, type AudioLoadingPriority } from './AudioLoadingConfig';
 
 type SoundPlayOptions = {
   volume?: number;
@@ -1533,19 +1534,34 @@ export class SoundManager {
     return allUrls;
   }
 
-  private getAllManifestUrls(): string[] {
+  private getAllManifestUrls(priority?: AudioLoadingPriority): string[] {
     const folders = this.getFolders();
     if (!folders || typeof folders !== 'object') return [];
+    
     const out: string[] = [];
     const seen = new Set<string>();
-    for (const urls of Object.values(folders)) {
-      if (!Array.isArray(urls)) continue;
-      for (const url of urls) {
+    
+    for (const [folderKey, urls] of Object.entries(folders)) {
+      if (!Array.isArray(urls) || urls.length === 0) continue;
+      
+      const rule = AUDIO_LOADING_RULES.find(r => {
+        if (typeof r.pattern === 'string') return folderKey === r.pattern;
+        return r.pattern.test(folderKey);
+      });
+      
+      if (!rule) continue;
+      if (priority && rule.priority !== priority) continue;
+      
+      const count = rule.samplesCount === 'all' ? urls.length : rule.samplesCount;
+      
+      for (let i = 0; i < Math.min(count, urls.length); i++) {
+        const url = urls[i];
         if (!url || seen.has(url)) continue;
         seen.add(url);
         out.push(url);
       }
     }
+    
     return out;
   }
 
@@ -1571,7 +1587,46 @@ export class SoundManager {
     return SoundManager.sessionAudioPackReady;
   }
 
-  public ensureSessionAudioPack(options?: { concurrency?: number; onProgress?: (loaded: number, total: number) => void }): Promise<void> {
+  public ensureSessionAudioPack(options?: { priority?: AudioLoadingPriority; concurrency?: number; onProgress?: (loaded: number, total: number) => void }): Promise<void> {
+    if (options?.priority) {
+      const urls = this.getAllManifestUrls(options.priority);
+      const total = urls.length;
+      
+      console.log(`[SoundManager] Priority ${options.priority} loading: ${total} files`);
+      console.log(`[SoundManager] Sample URLs:`, urls.slice(0, 5));
+      
+      if (total <= 0) {
+        console.warn(`[SoundManager] No files found for priority ${options.priority}`);
+        options?.onProgress?.(0, 0);
+        return Promise.resolve();
+      }
+      
+      const concurrency = Phaser.Math.Clamp(Math.floor(options?.concurrency ?? 5), 1, 10);
+      const queue = urls.slice();
+      let loaded = 0;
+      
+      options?.onProgress?.(0, total);
+      
+      const runWorker = async () => {
+        while (queue.length > 0 && !this.destroyed) {
+          const url = queue.shift();
+          if (!url) continue;
+          try {
+            await this.ensureLoaded(url);
+          } catch (err) {
+            console.error(`[SoundManager] Failed to load: ${url}`, err);
+          }
+          loaded += 1;
+          options?.onProgress?.(loaded, total);
+        }
+      };
+      
+      const workers = Array.from({ length: Math.min(concurrency, total) }, () => runWorker());
+      return Promise.all(workers).then(() => {
+        console.log(`[SoundManager] Priority ${options.priority} loading completed: ${loaded}/${total}`);
+      });
+    }
+    
     if (SoundManager.sessionAudioPackReady) {
       const total = Math.max(SoundManager.sessionAudioPackTotal, SoundManager.sessionAudioPackLoaded);
       options?.onProgress?.(total, total);

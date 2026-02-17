@@ -161,7 +161,7 @@ export class UIScene extends Phaser.Scene {
     this.onAimSensitivityHandler = (e: Event) => {
       const ce = e as CustomEvent;
       const raw = Number((ce.detail as any)?.value);
-      const next = Number.isFinite(raw) ? Phaser.Math.Clamp(raw, 0.5, 2.0) : this.readAimSensitivity();
+      const next = Number.isFinite(raw) ? Phaser.Math.Clamp(raw, 0.35, 2.5) : this.readAimSensitivity();
       this.aimSensitivity = next;
     };
     window.addEventListener('panzer-aim-sensitivity', this.onAimSensitivityHandler);
@@ -267,7 +267,7 @@ export class UIScene extends Phaser.Scene {
     const isTouch = this.sys.game.device.input.touch;
     if (!isTouch) {
       const p = this.input.activePointer;
-      const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.5, 2.0);
+      const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.35, 2.5);
       const w = Math.max(1, this.scale.width);
       const h = Math.max(1, this.scale.height);
       const cx = w * 0.5;
@@ -285,8 +285,6 @@ export class UIScene extends Phaser.Scene {
     }
 
     if (preset === 'new') {
-      if (this.crosshair?.visible) this.crosshair.setVisible(false);
-
       const cam = main.cameras?.main as Phaser.Cameras.Scene2D.Camera | undefined;
       const player = main.player;
       if (!cam || !player?.chassis?.active || !main.aimWorld?.set) return;
@@ -305,28 +303,38 @@ export class UIScene extends Phaser.Scene {
         }
 
         const mag = Math.min(1, Math.sqrt(this.aimStickVec.x * this.aimStickVec.x + this.aimStickVec.y * this.aimStickVec.y));
-        if (mag < 0.001) return;
-        const nx = this.aimStickVec.x / mag;
-        const ny = this.aimStickVec.y / mag;
-        const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.5, 2.0);
-        const senseT = Phaser.Math.Clamp((aimSense - 0.5) / 1.5, 0, 1);
-        const responseExp = Phaser.Math.Linear(1.65, 0.62, senseT);
-        const responseMag = Phaser.Math.Clamp(Math.pow(mag, responseExp), 0, 1);
-        const rangeMul = Phaser.Math.Linear(0.58, 1.32, senseT);
+        if (mag >= 0.001) {
+          const nx = this.aimStickVec.x / mag;
+          const ny = this.aimStickVec.y / mag;
+          const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.35, 2.5);
+          const senseT = Phaser.Math.Clamp((aimSense - 0.35) / 2.15, 0, 1);
+          const responseExp = Phaser.Math.Linear(1.8, 0.52, senseT);
+          const responseMag = Phaser.Math.Clamp(Math.pow(mag, responseExp), 0, 1);
+          const rangeMul = Phaser.Math.Linear(0.46, 1.6, senseT);
+          const fineAimMul = this.aimFirePointerId !== null ? 0.76 : 1;
 
-        const maxScreenDist = Math.min(this.aimClampRect.width, this.aimClampRect.height) * 0.62;
-        const dist = (maxScreenDist / Math.max(0.001, cam.zoom)) * responseMag * rangeMul;
+          const maxScreenDist = Math.min(this.aimClampRect.width, this.aimClampRect.height) * 0.62;
+          const dist = (maxScreenDist / Math.max(0.001, cam.zoom)) * responseMag * rangeMul * fineAimMul;
 
-        const px = player.chassis.x;
-        const py = player.chassis.y - 30;
-        main.aimWorld.set(px + nx * dist, py + ny * dist);
+          const px = player.chassis.x;
+          const py = player.chassis.y - 30;
+          main.aimWorld.set(px + nx * dist, py + ny * dist);
+        }
+      }
+      if (this.crosshair?.active) {
+        const show = pid !== null || this.aimFirePointerId !== null;
+        if (show) {
+          const sx = cam.x + (main.aimWorld.x - cam.worldView.x) * cam.zoom;
+          const sy = cam.y + (main.aimWorld.y - cam.worldView.y) * cam.zoom;
+          this.crosshair.setPosition(sx, sy).setScale(0.82).setAlpha(0.82).setVisible(true);
+        } else if (this.crosshair.visible) {
+          this.crosshair.setVisible(false);
+        }
       }
       return;
     }
 
     if (preset === 'tankstar') {
-      if (this.crosshair?.visible) this.crosshair.setVisible(false);
-
       const cam = main.cameras?.main as Phaser.Cameras.Scene2D.Camera | undefined;
       const player = main.player;
       if (!cam || !player?.chassis?.active || !main.aimWorld?.set) return;
@@ -345,21 +353,33 @@ export class UIScene extends Phaser.Scene {
         }
 
         const mag = Math.min(1, Math.sqrt(this.aimStickVec.x * this.aimStickVec.x + this.aimStickVec.y * this.aimStickVec.y));
-        if (mag < 0.001) return;
-        const nx = this.aimStickVec.x / mag;
-        const ny = this.aimStickVec.y / mag;
-        const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.5, 2.0);
-        const senseT = Phaser.Math.Clamp((aimSense - 0.5) / 1.5, 0, 1);
-        const responseExp = Phaser.Math.Linear(1.65, 0.62, senseT);
-        const responseMag = Phaser.Math.Clamp(Math.pow(mag, responseExp), 0, 1);
-        const rangeMul = Phaser.Math.Linear(0.58, 1.32, senseT);
+        if (mag >= 0.001) {
+          const nx = this.aimStickVec.x / mag;
+          const ny = this.aimStickVec.y / mag;
+          const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.35, 2.5);
+          const senseT = Phaser.Math.Clamp((aimSense - 0.35) / 2.15, 0, 1);
+          const responseExp = Phaser.Math.Linear(1.8, 0.52, senseT);
+          const responseMag = Phaser.Math.Clamp(Math.pow(mag, responseExp), 0, 1);
+          const rangeMul = Phaser.Math.Linear(0.46, 1.6, senseT);
+          const fineAimMul = this.aimFirePointerId !== null ? 0.76 : 1;
 
-        const maxWorldDist = (this.aimClampRect.width * 1.15) / Math.max(0.001, cam.zoom);
-        const dist = maxWorldDist * responseMag * rangeMul;
+          const maxWorldDist = (this.aimClampRect.width * 1.15) / Math.max(0.001, cam.zoom);
+          const dist = maxWorldDist * responseMag * rangeMul * fineAimMul;
 
-        const px = player.chassis.x;
-        const py = player.chassis.y - 30;
-        main.aimWorld.set(px + nx * dist, py + ny * dist);
+          const px = player.chassis.x;
+          const py = player.chassis.y - 30;
+          main.aimWorld.set(px + nx * dist, py + ny * dist);
+        }
+      }
+      if (this.crosshair?.active) {
+        const show = pid !== null || this.aimFirePointerId !== null;
+        if (show) {
+          const sx = cam.x + (main.aimWorld.x - cam.worldView.x) * cam.zoom;
+          const sy = cam.y + (main.aimWorld.y - cam.worldView.y) * cam.zoom;
+          this.crosshair.setPosition(sx, sy).setScale(0.82).setAlpha(0.82).setVisible(true);
+        } else if (this.crosshair.visible) {
+          this.crosshair.setVisible(false);
+        }
       }
       return;
     }
@@ -367,7 +387,7 @@ export class UIScene extends Phaser.Scene {
     if (this.aimPointerId !== null) {
       const p = this.input.manager.pointers.find(ptr => ptr.id === this.aimPointerId);
       if (p && p.active) {
-        const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.5, 2.0);
+        const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.35, 2.5);
         const w = Math.max(1, this.scale.width);
         const h = Math.max(1, this.scale.height);
         const cx = w * 0.5;
@@ -441,7 +461,7 @@ export class UIScene extends Phaser.Scene {
   private readAimSensitivity(): number {
     try {
       const raw = Number.parseFloat(window.localStorage.getItem('panzer-aim-sensitivity') ?? '1');
-      if (Number.isFinite(raw)) return Phaser.Math.Clamp(raw, 0.5, 2.0);
+      if (Number.isFinite(raw)) return Phaser.Math.Clamp(raw, 0.35, 2.5);
     } catch {}
     return 1;
   }
@@ -1336,6 +1356,13 @@ export class UIScene extends Phaser.Scene {
     if (this.isPointOverButton(p.x, p.y)) return;
     const main: any = this.scene.get('MainScene');
     if (!main?.sys?.isActive?.()) return;
+    const cam = main.cameras?.main as Phaser.Cameras.Scene2D.Camera | undefined;
+    if (cam && main.aimWorld?.set) {
+      const shakeX = Number((cam as any)?.shakeEffect?._offsetX ?? 0);
+      const shakeY = Number((cam as any)?.shakeEffect?._offsetY ?? 0);
+      const wp = cam.getWorldPoint(p.x - cam.x - shakeX, p.y - cam.y - shakeY);
+      main.aimWorld.set(wp.x, wp.y);
+    }
     if (this.aimPointerId !== null) return;
     this.aimPointerId = p.id;
     this.aimStartScreen.set(p.x, p.y);
