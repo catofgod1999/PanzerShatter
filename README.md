@@ -1,6 +1,6 @@
-制作：LicseL
-**Prerequisites:**
-使用Ai模型：Gemini、Gpt、Claude、Suno。
+<titler>制作：LicseL</title>
+
+
 
 ## Run Locally
 
@@ -12,7 +12,7 @@
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-
+使用Ai模型：Gemini、Gpt、Claude、Suno。
 ## Zeabur 部署音效延迟优化
 
 - 项目已内置两层优化：
