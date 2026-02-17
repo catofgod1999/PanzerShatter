@@ -69,6 +69,7 @@ export class MainScene extends Phaser.Scene {
       enemyCollider?: Phaser.Physics.Arcade.Collider | null;
     }[];
     waterZone: Phaser.GameObjects.Rectangle;
+    playerWaterOverlap?: Phaser.Physics.Arcade.Collider | null;
     audioArea: { x0: number; x1: number; y0: number; y1: number; maxDistance: number };
     wavePhase: number;
     lastVisualT: number;
@@ -315,6 +316,10 @@ export class MainScene extends Phaser.Scene {
     for (const l of this.lakes) {
       if (l?.gfx?.active) l.gfx.destroy();
       if (l?.surfaceGfx?.active) l.surfaceGfx.destroy();
+      if (l?.playerWaterOverlap) {
+        try { l.playerWaterOverlap.destroy(); } catch {}
+        l.playerWaterOverlap = null;
+      }
       if (l?.waterZone?.active) l.waterZone.destroy();
       if (l?.loopId) this.audio?.stopLoop?.(l.loopId, 0);
       if (l?.bridgeContainer?.active) {
@@ -491,6 +496,7 @@ export class MainScene extends Phaser.Scene {
     const pScale = Tank.getScaleFor(TankType.PLAYER_SOVIET, true);
     this.player = new Tank(this, startX, this.getTerrainHeight(startX) - 100 * pScale, TankType.PLAYER_SOVIET, true);
     this.player.chassis.setData('tankRef', this.player);
+    for (const lake of this.lakes) this.bindPlayerToLake(lake);
     this.aimWorld.set(this.player.chassis.x, this.player.chassis.y);
     this.events.emit('update-hud', { hp: 100, shell: ShellType[this.player.currentShell] ?? 'STANDARD', totalScore: 0 });
     {
@@ -4024,25 +4030,14 @@ export class MainScene extends Phaser.Scene {
       const cx = x + (Math.min(segW, end - x)) * 0.5;
       const rect = this.add.rectangle(cx, bridgeY, w, segH, 0x000000, 0).setDepth(27).setAlpha(0);
       this.physics.add.existing(rect, true);
-      const playerCollider = this.player?.chassis?.active ? this.physics.add.collider(this.player.chassis, rect) : null;
       const enemyCollider = this.physics.add.collider(this.enemiesGroup, rect);
-      segments.push({ rect, health: 50, maxHealth: 50, playerCollider, enemyCollider });
+      segments.push({ rect, health: 50, maxHealth: 50, playerCollider: null, enemyCollider });
     }
 
     const worldBottom = this.physics.world.bounds.bottom;
     const zoneH = Math.max(900, (worldBottom - waterY) + 900);
     const waterZone = this.add.rectangle((start + end) * 0.5, waterY + zoneH * 0.5, end - start, zoneH, 0, 0).setVisible(false);
     this.physics.add.existing(waterZone, true);
-    this.physics.add.overlap(this.player.chassis, waterZone, () => {
-      if (!this.player?.active || this.player.isDead) return;
-      if (this.player.chassis.y < waterY + 12) return;
-      const now = this.time.now;
-      const last = (this.player.chassis.getData('lastLakeDamageT') as number | undefined) ?? 0;
-      if (now > last + 250) {
-        this.player.chassis.setData('lastLakeDamageT', now);
-        this.player.takeDamage(this.player.maxHp * 0.0075, ShellType.HE);
-      }
-    });
     this.physics.add.overlap(this.enemiesGroup, waterZone, (obj: any) => {
       const ref = obj?.getData?.('tankRef');
       if (ref?.active && !ref.isDead && typeof ref.takeDamage === 'function') {
@@ -4079,8 +4074,25 @@ export class MainScene extends Phaser.Scene {
       maxDistance: Phaser.Math.Clamp((end - start) * 0.42 + 900, 1400, 3000)
     };
 
-    const lake = { x0: start, x1: end, gfx, surfaceGfx, bridgeContainer, bridgeBricksBySeg: [] as Phaser.GameObjects.Sprite[][], waterY, bridgeY, segments, waterZone, audioArea, wavePhase: Math.random() * 1000, lastVisualT: 0, lastBridgeBrickSyncT: 0 };
+    const lake = {
+      x0: start,
+      x1: end,
+      gfx,
+      surfaceGfx,
+      bridgeContainer,
+      bridgeBricksBySeg: [] as Phaser.GameObjects.Sprite[][],
+      waterY,
+      bridgeY,
+      segments,
+      waterZone,
+      playerWaterOverlap: null,
+      audioArea,
+      wavePhase: Math.random() * 1000,
+      lastVisualT: 0,
+      lastBridgeBrickSyncT: 0
+    };
     this.lakes.push(lake);
+    this.bindPlayerToLake(lake);
     this.redrawLake(lake);
     this.redrawLakeSurface(lake, this.time.now);
     this.buildBrickBridge(lake);
@@ -4102,6 +4114,30 @@ export class MainScene extends Phaser.Scene {
     const sub = new LandSubmarine(this, subX, lake.waterY + 260, { mode: 'LAKE', lake: { x0: lake.x0, x1: lake.x1, waterY: lake.waterY } });
     this.enemies.push(sub);
     this.physics.add.overlap(this.mineGroup, sub, (mineObj: any, enemyObj: any) => this.handleMineTrigger(mineObj, enemyObj));
+  }
+
+  private bindPlayerToLake(lake: (typeof this.lakes)[number]) {
+    const playerChassis = this.player?.chassis;
+    if (!playerChassis?.active || !lake?.waterZone?.active) return;
+
+    for (const seg of lake.segments) {
+      if (!seg?.rect?.active) continue;
+      if (seg.playerCollider) continue;
+      seg.playerCollider = this.physics.add.collider(playerChassis, seg.rect);
+    }
+
+    if (!lake.playerWaterOverlap) {
+      lake.playerWaterOverlap = this.physics.add.overlap(playerChassis, lake.waterZone, () => {
+        if (!this.player?.active || this.player.isDead || !this.player.chassis?.active) return;
+        if (this.player.chassis.y < lake.waterY + 12) return;
+        const now = this.time.now;
+        const last = (this.player.chassis.getData('lastLakeDamageT') as number | undefined) ?? 0;
+        if (now > last + 250) {
+          this.player.chassis.setData('lastLakeDamageT', now);
+          this.player.takeDamage(this.player.maxHp * 0.0075, ShellType.HE);
+        }
+      });
+    }
   }
 
   private spawnLakeLife(lake: (typeof this.lakes)[number]) {

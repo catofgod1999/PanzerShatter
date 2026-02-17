@@ -709,6 +709,44 @@ export class SoundManager {
     this.reverbStartSerial = 0;
   }
 
+  private safeSetVolume(sound: ManagedSound, volume: number): boolean {
+    try {
+      sound.setVolume(volume);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private pruneBrokenLoop(id: string, sound: ManagedSound) {
+    try { this.detachLowpass(sound); } catch {}
+    try { sound.stop?.(); } catch {}
+    try { sound.destroy?.(); } catch {}
+    this.loops.delete(id);
+    this.loopStarting.delete(id);
+    this.loopFadeTween.delete(id);
+    this.loopStartToken.delete(id);
+    this.loopFolderById.delete(id);
+    this.loopTargetVolume.delete(id);
+    this.loopDesiredVolume.delete(id);
+    this.clearLoopUnlockWait(id);
+  }
+
+  private pruneBrokenOneShot(sound: ManagedSound) {
+    this.activeOneShots.delete(sound);
+    try { this.detachLowpass(sound); } catch {}
+    try { sound.stop?.(); } catch {}
+    try { sound.destroy?.(); } catch {}
+  }
+
+  private pruneBrokenExclusive(id: string, sound: ManagedSound) {
+    this.exclusiveSounds.delete(id);
+    this.exclusiveToken.delete(id);
+    try { this.detachLowpass(sound); } catch {}
+    try { sound.stop?.(); } catch {}
+    try { sound.destroy?.(); } catch {}
+  }
+
   private update() {
     if (this.destroyed) return;
     this.ensureLimiterConnected();
@@ -793,7 +831,10 @@ export class SoundManager {
       const isVehicleFolder = typeof folderKey === 'string' && this.normalizeFolderKey(folderKey).replace(/^public\/sfx\//, '').startsWith('vehicle/');
       const cookoffFocusDuck = isVehicleFolder ? 1.0 : this.currentCookoffFocusDuck;
       const finalVol = baseVolume * a * duckVol * bgmDuckVol * cookoffFocusDuck;
-      sound.setVolume(finalVol);
+      if (!this.safeSetVolume(sound, finalVol)) {
+        this.pruneBrokenLoop(id, sound);
+        continue;
+      }
 
       if (isBurningLoop) {
         let mixerLowpassHz = (sound as any).__panzerMixerLowpassHz as number | undefined;
@@ -867,7 +908,10 @@ export class SoundManager {
       const isVehicleFolder = normalizedFolder.startsWith('vehicle/');
       const cookoffFocusDuck = isVehicleFolder ? 1.0 : this.currentCookoffFocusDuck;
       const targetVolume = Phaser.Math.Clamp((typeof baseVolume === 'number' ? baseVolume : snd.volume) * att * reverbMul * cookoffFocusDuck, 0, 2);
-      snd.setVolume(targetVolume);
+      if (!this.safeSetVolume(snd, targetVolume)) {
+        this.pruneBrokenOneShot(snd);
+        continue;
+      }
 
       if (cookoffFocusActive && !isVehicleFolder) {
         let mixerLowpassHz = (snd as any).__panzerMixerLowpassHz as number | undefined;
@@ -886,7 +930,7 @@ export class SoundManager {
     }
 
     // Optional dynamic spatial tracking for exclusive one-shots (vehicle explosion tails, etc.).
-    for (const snd of this.exclusiveSounds.values()) {
+    for (const [exclusiveId, snd] of this.exclusiveSounds.entries()) {
       if (!snd?.isPlaying) continue;
       const folderKey = (snd as any).__panzerFolderKey as string | undefined;
       const isWeaponForestReverb = this.isWeaponForestReverbFolder(folderKey);
@@ -921,7 +965,10 @@ export class SoundManager {
       const isVehicleFolder = normalizedFolder.startsWith('vehicle/');
       const cookoffFocusDuck = isVehicleFolder ? 1.0 : this.currentCookoffFocusDuck;
       const targetVolume = Phaser.Math.Clamp((typeof baseVolume === 'number' ? baseVolume : snd.volume) * att * reverbMul * cookoffFocusDuck, 0, 2);
-      snd.setVolume(targetVolume);
+      if (!this.safeSetVolume(snd, targetVolume)) {
+        this.pruneBrokenExclusive(exclusiveId, snd);
+        continue;
+      }
 
       if (cookoffFocusActive && !isVehicleFolder) {
         let mixerLowpassHz = (snd as any).__panzerMixerLowpassHz as number | undefined;
