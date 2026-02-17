@@ -12,7 +12,7 @@
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-使用Ai模型：Gemini、Gpt、Claude、Suno。
+
 ## Zeabur 部署音效延迟优化
 
 - 项目已内置两层优化：
@@ -24,3 +24,4 @@
   - 保证 `dist` 内容映射到 Caddy 的静态目录（如 `/usr/share/caddy`）
 
 - 推荐额外开启 Zeabur CDN 或将服务部署到用户更近区域，可进一步降低首包和首播延迟。
+使用Ai模型：Gemini、Gpt、Claude、Suno。
