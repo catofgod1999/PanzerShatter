@@ -614,8 +614,8 @@ export class SoundManager {
     if (key.startsWith('vehicle/')) {
       if (this.folderHasSegment(key, 'fire')) return 0.95;
       if (this.folderHasSegment(key, 'cookoff') || this.folderHasSegment(key, 'explosion')) {
-        if (key.startsWith('vehicle/enemy_')) return 0.52;
-        return 0.68;
+        if (key.startsWith('vehicle/enemy_')) return 0.18;
+        return 0.3;
       }
       if (this.folderHasSegment(key, 'flight_loop')) return 0.88;
       if (this.folderHasSegment(key, 'idle_engine_loop')) return 0.74;
@@ -640,8 +640,8 @@ export class SoundManager {
     if (key.startsWith('vehicle/')) {
       if (this.folderHasSegment(key, 'fire')) return 0.9;
       if (this.folderHasSegment(key, 'cookoff') || this.folderHasSegment(key, 'explosion')) {
-        if (key.startsWith('vehicle/enemy_')) return 0.34;
-        return 0.48;
+        if (key.startsWith('vehicle/enemy_')) return 0.08;
+        return 0.14;
       }
       return 0.28;
     }
@@ -781,10 +781,10 @@ export class SoundManager {
       }
     }
 
-    const cookoffTargetDuck = cookoffFocusActive ? 0.68 : 1.0;
-    const cookoffTargetLowpassHz = cookoffFocusActive ? 7200 : 30000;
-    const cookoffDuckSpeed = cookoffTargetDuck < this.currentCookoffFocusDuck ? 0.20 : 0.06;
-    const cookoffLowpassSpeed = cookoffTargetLowpassHz < this.currentCookoffFocusLowpassHz ? 0.22 : 0.07;
+    const cookoffTargetDuck = cookoffFocusActive ? 0.88 : 1.0;
+    const cookoffTargetLowpassHz = cookoffFocusActive ? 14000 : 30000;
+    const cookoffDuckSpeed = cookoffTargetDuck < this.currentCookoffFocusDuck ? 0.12 : 0.045;
+    const cookoffLowpassSpeed = cookoffTargetLowpassHz < this.currentCookoffFocusLowpassHz ? 0.14 : 0.06;
     this.currentCookoffFocusDuck = Phaser.Math.Linear(this.currentCookoffFocusDuck, cookoffTargetDuck, cookoffDuckSpeed);
     this.currentCookoffFocusLowpassHz = Phaser.Math.Linear(this.currentCookoffFocusLowpassHz, cookoffTargetLowpassHz, cookoffLowpassSpeed);
 
@@ -1044,8 +1044,9 @@ export class SoundManager {
       }
     }
 
+    const sidechainStackPerTrigger = cookoffFocusActive ? 0.015 : 0.04;
     const stackedStrength = Phaser.Math.Clamp(
-      bgmSidechainStrength + Math.max(0, sidechainTriggerCount - 1) * 0.04,
+      bgmSidechainStrength + Math.max(0, sidechainTriggerCount - 1) * sidechainStackPerTrigger,
       0,
       1
     );

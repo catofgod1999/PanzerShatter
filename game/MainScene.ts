@@ -285,6 +285,10 @@ export class MainScene extends Phaser.Scene {
   private tutorialPlayerShellHandler?: (ev: any) => void;
   private tutorialPlayerMortarHandler?: (ev: any) => void;
   private tutorialPlayerNukeHandler?: (ev: any) => void;
+  private tutorialSwitchVisitedShells = new Set<ShellType>();
+  private tutorialGateBlockedHintUntil = 0;
+  private tutorialGateLastBlockAt = 0;
+  private readonly tutorialTotalSteps = 8;
 
   private hunterIntro?: {
     tank: Tank;
@@ -562,6 +566,10 @@ export class MainScene extends Phaser.Scene {
 
     if (this.tutorialMode) {
       this.setupTutorialScenario();
+      for (const loopId of this.bgmLoopIds) this.audio.stopLoop(loopId, 0);
+      this.forestBgmCurrent = null;
+      this.forestBgmActiveLoopId = null;
+      this.forestBgmCurrentFolder = null;
     }
 
     if (!this.testRoomEnabled && !this.tutorialMode && this.mapId === 'forest') this.createForestExitBase();
@@ -5487,6 +5495,7 @@ export class MainScene extends Phaser.Scene {
     now: number,
     opts?: { transition?: ForestBgmTransition; forceRestart?: boolean }
   ) {
+    if (this.tutorialMode) return;
     const folder = this.getForestBgmFolder(state);
     const transition = opts?.transition ?? (this.forestBgmCurrent === null ? 'initial' : 'crossfade');
     this.clearQueuedForestBgmTransition();
@@ -5614,13 +5623,13 @@ export class MainScene extends Phaser.Scene {
     this.forestLastCombatDamageAt = now;
     this.forestCombatActive = true;
     this.noteEnemyCombatActivity(now);
-    if (this.mapId !== 'forest' || this.testRoomEnabled) return;
+    if (this.mapId !== 'forest' || this.testRoomEnabled || this.tutorialMode) return;
     if (this.forestHunterBgmLatched || this.forestSafeZoneBgmLatched || this.forestEndBgmLatched) return;
     if (this.forestBgmCurrent !== 'combat') this.applyForestBgmState('combat', now, { transition: 'combat_in' });
   }
 
   private updateForestBgm(now: number) {
-    if (this.mapId !== 'forest' || this.testRoomEnabled || !this.player?.chassis?.active) return;
+    if (this.mapId !== 'forest' || this.testRoomEnabled || this.tutorialMode || !this.player?.chassis?.active) return;
 
     if (now > this.forestLastThreatProbeAt + 200) {
       this.forestLastThreatProbeAt = now;
@@ -5868,58 +5877,142 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  private hasTutorialShellSwitchCompleted(): boolean {
+    return this.tutorialSwitchVisitedShells.has(ShellType.HE)
+      || this.tutorialSwitchVisitedShells.has(ShellType.AP)
+      || this.tutorialSwitchVisitedShells.has(ShellType.INCENDIARY);
+  }
+
+  private getTutorialStepContentRich(step: number) {
+    const mobile = this.sys.game.device.os.android || this.sys.game.device.os.iOS || this.sys.game.device.input.touch;
+    const pcTexts = [
+      '按 A / D 向右移动到前方黄色标记区域。',
+      '学习切换炮弹：按 1/2/3/4 切换标准/高爆/穿甲/燃烧，至少切到一种非标准炮弹。',
+      '长按鼠标左键瞄准，松开发射 1 发主炮。',
+      '摧毁前方靶车，熟悉弹道落点。',
+      '前方是无桥湖区，按住 Space 升空越湖。',
+      '长按 Z 瞄准迫击炮，松开发射 1 发（本步免除一次冷却）。',
+      '长按 X 瞄准核弹，松开发射 1 发（本步免除一次冷却）。',
+      '前往撤离基地，按 Shift 可加速冲刺。'
+    ];
+    const touchTexts = [
+      '按住左侧移动摇杆，向右移动到前方黄色标记区域。',
+      '学习切换炮弹：点击“炮弹”按钮可循环切换，长按可弹出扇形选择，至少切到一种非标准炮弹。',
+      '按住右侧瞄准区，松开发射 1 发主炮。',
+      '摧毁前方靶车，熟悉弹道落点。',
+      '前方是无桥湖区，按住“升空”按钮越湖。',
+      '长按“迫击”进入迫击炮瞄准，松开发射 1 发（本步免除一次冷却）。',
+      '长按“核弹”进入核弹瞄准，松开发射 1 发（本步免除一次冷却）。',
+      '前往撤离基地，按住“加速”可快速抵达。'
+    ];
+    const steps = mobile ? touchTexts : pcTexts;
+    const idx = Phaser.Math.Clamp(step, 0, steps.length - 1);
+    return {
+      title: `教程 ${idx + 1}/${steps.length}`,
+      body: steps[idx] ?? '',
+      stepLine: `当前阶段 ${idx + 1}/${steps.length}`
+    };
+  }
+
+  private getTutorialStepProgressLineRich(step: number): string {
+    switch (step) {
+      case 1:
+        return this.hasTutorialShellSwitchCompleted()
+          ? '炮弹切换：已完成'
+          : '炮弹切换：请切到高爆/穿甲/燃烧任意一种';
+      case 2: {
+        const fired = Math.max(0, this.tutorialMainShellShots - this.tutorialStepMainShotStart);
+        return `主炮发射 ${Math.min(1, fired)}/1`;
+      }
+      case 3:
+        return (!this.tutorialDummyTarget?.active || this.tutorialDummyTarget.isDead)
+          ? '靶车状态：已摧毁'
+          : '靶车状态：待摧毁';
+      case 4: {
+        if (this.tutorialLiftSatisfied) return '越湖状态：已满足';
+        const lake = this.tutorialLakeBounds;
+        const playerX = this.player?.chassis?.active ? this.player.chassis.x : Number.NaN;
+        if (!lake || !Number.isFinite(playerX)) return '越湖状态：等待进入湖区';
+        if (playerX < lake.x0 - 80) return '越湖状态：前往湖区并按住升空';
+        if (playerX > lake.x1 + 120) return '越湖状态：已通过湖区';
+        return '越湖状态：保持升空通过湖面';
+      }
+      case 5: {
+        const fired = Math.max(0, this.tutorialMortarShots - this.tutorialStepMortarShotStart);
+        return `迫击炮发射 ${Math.min(1, fired)}/1`;
+      }
+      case 6: {
+        const fired = Math.max(0, this.tutorialNukeShots - this.tutorialStepNukeShotStart);
+        return `核弹发射 ${Math.min(1, fired)}/1`;
+      }
+      case 7: {
+        const zone = this.tutorialExitZone;
+        if (zone?.active && this.player?.chassis?.active) {
+          const dist = Math.max(0, Math.round(Math.abs(zone.x - this.player.chassis.x)));
+          return `距撤离区约 ${dist}`;
+        }
+        return '目标：进入撤离基地';
+      }
+      default:
+        return '目标：抵达前方标记区域';
+    }
+  }
+
   private ensureTutorialUi() {
     if (!this.tutorialMode) return;
     const w = this.scale.width;
-    const top = this.sys.game.device.os.android ? 84 : 78;
-    const panelW = Phaser.Math.Clamp(Math.round(w * 0.72), 420, 820);
-    const panelH = this.sys.game.device.os.android ? 128 : 118;
+    const isMobile = this.sys.game.device.os.android || this.sys.game.device.os.iOS || this.sys.game.device.input.touch;
+    const top = isMobile ? 110 : 96;
+    const panelW = Phaser.Math.Clamp(Math.round(w * 0.82), 560, 980);
+    const panelH = isMobile ? 212 : 188;
 
     if (!this.tutorialUiPanel?.active) {
-      this.tutorialUiPanel = this.add.rectangle(w * 0.5, top, panelW, panelH, 0x000000, 0.44)
+      this.tutorialUiPanel = this.add.rectangle(w * 0.5, top, panelW, panelH, 0x000000, 0.56)
         .setDepth(1400)
         .setScrollFactor(0)
-        .setStrokeStyle(2, 0xffd35a, 0.68);
+        .setStrokeStyle(3, 0xffd35a, 0.78);
       this.tutorialUiTitle = this.add.text(w * 0.5, top - panelH * 0.38, '', {
-        fontSize: this.sys.game.device.os.android ? '28px' : '24px',
+        fontSize: isMobile ? '40px' : '34px',
         color: '#ffe7a4',
         fontStyle: 'bold',
         stroke: '#000000',
-        strokeThickness: 5
+        strokeThickness: 6
       }).setOrigin(0.5).setDepth(1401).setScrollFactor(0);
       this.tutorialUiBody = this.add.text(w * 0.5, top - panelH * 0.07, '', {
-        fontSize: this.sys.game.device.os.android ? '22px' : '18px',
+        fontSize: isMobile ? '30px' : '24px',
         color: '#f2f4f8',
         align: 'center',
         stroke: '#000000',
-        strokeThickness: 4,
-        lineSpacing: 4,
-        wordWrap: { width: panelW - 42, useAdvancedWrap: true }
+        strokeThickness: 5,
+        lineSpacing: 8,
+        wordWrap: { width: panelW - 56, useAdvancedWrap: true }
       }).setOrigin(0.5, 0).setDepth(1401).setScrollFactor(0);
       this.tutorialUiStep = this.add.text(w * 0.5, top + panelH * 0.36, '', {
-        fontSize: this.sys.game.device.os.android ? '18px' : '14px',
+        fontSize: isMobile ? '24px' : '20px',
         color: '#ffd780',
         stroke: '#000000',
-        strokeThickness: 4
+        strokeThickness: 5
       }).setOrigin(0.5).setDepth(1401).setScrollFactor(0);
     }
 
     this.tutorialUiPanel?.setPosition(w * 0.5, top).setSize(panelW, panelH);
     this.tutorialUiTitle?.setPosition(w * 0.5, top - panelH * 0.38);
     this.tutorialUiBody?.setPosition(w * 0.5, top - panelH * 0.07);
-    this.tutorialUiBody?.setWordWrapWidth(panelW - 42, true);
+    this.tutorialUiBody?.setWordWrapWidth(panelW - 56, true);
     this.tutorialUiStep?.setPosition(w * 0.5, top + panelH * 0.36);
   }
 
   private refreshTutorialUi() {
     if (!this.tutorialMode) return;
     this.ensureTutorialUi();
-    const info = this.getTutorialStepContent(this.tutorialStep);
-    const progressLine = this.getTutorialStepProgressLine(this.tutorialStep);
+    const info = this.getTutorialStepContentRich(this.tutorialStep);
+    const progressLine = this.getTutorialStepProgressLineRich(this.tutorialStep);
     const stepText = progressLine ? `${info.stepLine} · ${progressLine}` : info.stepLine;
+    const blockedHint = this.time.now < this.tutorialGateBlockedHintUntil ? ' ｜前方锁定：先完成当前教学' : '';
+    const stepTextOut = `${stepText}${this.time.now < this.tutorialGateBlockedHintUntil ? ' | \u524d\u65b9\u9501\u5b9a\uff1a\u5148\u5b8c\u6210\u5f53\u524d\u6559\u5b66' : ''}`;
     if (this.tutorialUiTitle?.active) this.tutorialUiTitle.setText(info.title);
     if (this.tutorialUiBody?.active) this.tutorialUiBody.setText(info.body);
-    if (this.tutorialUiStep?.active) this.tutorialUiStep.setText(stepText);
+    if (this.tutorialUiStep?.active) this.tutorialUiStep.setText(stepTextOut);
   }
 
   private spawnTutorialDummyTarget(x: number, type: TankType = TankType.ENEMY_PANZER): Tank {
@@ -6094,6 +6187,9 @@ export class MainScene extends Phaser.Scene {
     this.tutorialStepMortarShotStart = 0;
     this.tutorialStepNukeShotStart = 0;
     this.tutorialCooldownBypass = 'none';
+    this.tutorialSwitchVisitedShells.clear();
+    this.tutorialGateBlockedHintUntil = 0;
+    this.tutorialGateLastBlockAt = 0;
     this.tutorialLakeBounds = null;
     this.tutorialDummyTarget = null;
     this.tutorialUiNextRefreshAt = 0;
@@ -6116,7 +6212,7 @@ export class MainScene extends Phaser.Scene {
 
   private setTutorialStep(step: number, force: boolean = false) {
     if (!this.tutorialMode) return;
-    const clamped = Phaser.Math.Clamp(step, 0, 6);
+    const clamped = Phaser.Math.Clamp(step, 0, this.tutorialTotalSteps - 1);
     if (!force && clamped === this.tutorialStep) return;
 
     if (this.tutorialCooldownBypass !== 'none' && this.player?.active) {
@@ -6129,24 +6225,29 @@ export class MainScene extends Phaser.Scene {
     this.tutorialUiNextRefreshAt = 0;
 
     if (clamped === 1) {
+      this.tutorialSwitchVisitedShells.clear();
+      this.tutorialSwitchVisitedShells.add(ShellType.STANDARD);
+    }
+    if (clamped === 2) {
       this.tutorialStepMainShotStart = this.tutorialMainShellShots;
     }
-    if (clamped === 4) {
+    if (clamped === 5) {
       this.tutorialStepMortarShotStart = this.tutorialMortarShots;
     }
-    if (clamped === 5) {
+    if (clamped === 6) {
       this.tutorialStepNukeShotStart = this.tutorialNukeShots;
     }
 
     if (this.player?.active) {
       if (clamped === 1) this.player.setShell(ShellType.STANDARD);
-      if (clamped === 4) {
+      if (clamped === 2) this.player.setShell(ShellType.STANDARD);
+      if (clamped === 5) {
         this.player.setShell(ShellType.MORTAR);
         this.player.grantOneTimeCooldownWaiver(ShellType.MORTAR);
         this.player.setNoCooldown(true);
         this.tutorialCooldownBypass = 'mortar';
       }
-      if (clamped === 5) {
+      if (clamped === 6) {
         this.player.setShell(ShellType.NUKE);
         this.player.grantOneTimeCooldownWaiver(ShellType.NUKE);
         this.player.setNoCooldown(true);
@@ -6174,6 +6275,54 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  private getTutorialForwardLimitX(): number {
+    if (!this.player?.chassis?.active) return Number.POSITIVE_INFINITY;
+    const dummyX = this.tutorialDummyTarget?.chassis?.active
+      ? this.tutorialDummyTarget.chassis.x
+      : (this.tutorialMoveTargetX + 760);
+    const lakeX1 = this.tutorialLakeBounds?.x1 ?? (dummyX + 1700);
+    switch (this.tutorialStep) {
+      case 0:
+        return this.tutorialMoveTargetX + 60;
+      case 1:
+        return dummyX - 260;
+      case 2:
+        return dummyX - 180;
+      case 3:
+        return dummyX + 220;
+      case 4:
+        return lakeX1 + 240;
+      case 5:
+      case 6:
+        return lakeX1 + 620;
+      default:
+        return Number.POSITIVE_INFINITY;
+    }
+  }
+
+  private enforceTutorialProgressGate(time: number) {
+    if (!this.tutorialMode || this.tutorialComplete || !this.player?.chassis?.active) return;
+    const limitX = this.getTutorialForwardLimitX();
+    if (!Number.isFinite(limitX)) return;
+
+    const chassis = this.player.chassis;
+    if (chassis.x <= limitX) return;
+    const overflow = chassis.x - limitX;
+    const body = chassis.body as Phaser.Physics.Arcade.Body | undefined;
+
+    chassis.x = limitX;
+    if (body) {
+      body.x = chassis.x - body.halfWidth;
+      body.setVelocityX(Math.min(0, body.velocity.x - Math.min(220, 110 + overflow * 2.1)));
+    }
+
+    if (time >= this.tutorialGateLastBlockAt + 240) {
+      this.tutorialGateLastBlockAt = time;
+      this.tutorialGateBlockedHintUntil = time + 1100;
+      this.refreshTutorialUi();
+    }
+  }
+
   private updateTutorialMode(time: number) {
     if (!this.tutorialMode || this.tutorialComplete || !this.player?.chassis?.active) return;
 
@@ -6185,6 +6334,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     const stepElapsed = Math.max(0, time - this.tutorialStepStartedAt);
+    this.enforceTutorialProgressGate(time);
     const px = this.player.chassis.x;
     const py = this.player.chassis.y;
 
@@ -6195,48 +6345,55 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    if (this.tutorialStep === 1) {
+      this.tutorialSwitchVisitedShells.add(this.player.currentShell);
+    }
+
     switch (this.tutorialStep) {
       case 0:
         if (px >= this.tutorialMoveTargetX) this.setTutorialStep(1);
         break;
       case 1:
+        if (this.hasTutorialShellSwitchCompleted()) this.setTutorialStep(2);
+        break;
+      case 2:
         if (this.tutorialMainShellShots > this.tutorialStepMainShotStart) {
-          this.setTutorialStep(2);
+          this.setTutorialStep(3);
           break;
         }
         if (stepElapsed > 9000 && this.player.currentShell !== ShellType.STANDARD) {
           this.player.setShell(ShellType.STANDARD);
         }
         break;
-      case 2:
+      case 3:
         if (!this.tutorialDummyTarget?.active || this.tutorialDummyTarget.isDead) {
-          this.setTutorialStep(3);
+          this.setTutorialStep(4);
           break;
         }
         if (stepElapsed > 30000) {
           const dummyX = this.tutorialDummyTarget?.chassis?.active ? this.tutorialDummyTarget.chassis.x : (this.tutorialMoveTargetX + 720);
-          if (px > dummyX + 420) this.setTutorialStep(3);
-        }
-        break;
-      case 3:
-        if (this.tutorialLakeBounds && px > this.tutorialLakeBounds.x1 + 120) {
-          this.tutorialLiftSatisfied = true;
-          this.setTutorialStep(4);
+          if (px > dummyX + 420) this.setTutorialStep(4);
         }
         break;
       case 4:
+        if (this.tutorialLakeBounds && px > this.tutorialLakeBounds.x1 + 120) {
+          this.tutorialLiftSatisfied = true;
+          this.setTutorialStep(5);
+        }
+        break;
+      case 5:
         if (this.player.currentShell !== ShellType.MORTAR && stepElapsed > 500) {
           this.player.setShell(ShellType.MORTAR);
         }
-        if (this.tutorialMortarShots > this.tutorialStepMortarShotStart) this.setTutorialStep(5);
+        if (this.tutorialMortarShots > this.tutorialStepMortarShotStart) this.setTutorialStep(6);
         break;
-      case 5:
+      case 6:
         if (this.player.currentShell !== ShellType.NUKE && stepElapsed > 500) {
           this.player.setShell(ShellType.NUKE);
         }
-        if (this.tutorialNukeShots > this.tutorialStepNukeShotStart) this.setTutorialStep(6);
+        if (this.tutorialNukeShots > this.tutorialStepNukeShotStart) this.setTutorialStep(7);
         break;
-      case 6: {
+      case 7: {
         const zone = this.tutorialExitZone;
         if (zone?.active) {
           const bounds = zone.getBounds();

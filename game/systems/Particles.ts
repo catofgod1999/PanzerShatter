@@ -393,69 +393,85 @@ export class ParticleSystems {
     }
   ) {
     if (!this.isNearCamera(x, y, 520)) return;
-    const cam = this.scene.cameras.main;
-    const screenX = (x - cam.scrollX) * cam.zoom;
-    const screenY = (y - cam.scrollY) * cam.zoom;
     const strength = Phaser.Math.Clamp(opts?.strength ?? 0.42, 0.08, 0.98);
     const color = opts?.color ?? 0xffc896;
-    const duration = Math.max(90, opts?.durationMs ?? 280);
+    const duration = Math.max(90, opts?.durationMs ?? 220);
+    const mobile = this.fxMul < 0.85;
+    const depthBase = 118;
 
-    if (this.scene.textures.exists('fx_soft_glow') && this.tryReserveGlow(0.62 + strength * 0.75)) {
-      const bloom = this.scene.add.image(screenX, screenY, 'fx_soft_glow').setDepth(118).setScrollFactor(0);
-      bloom.setBlendMode(Phaser.BlendModes.ADD);
-      bloom.setTint(color);
-      bloom.setAlpha(strength * 0.54 * (this.fxMul < 0.85 ? 0.88 : 1));
-      bloom.setScale((cam.width / 64) * 0.23, (cam.height / 64) * 0.21);
+    const coreCost = 0.24 + strength * 0.26;
+    if (this.tryReserveGlow(coreCost)) {
+      const core = this.scene.add.ellipse(
+        x,
+        y,
+        42 + strength * 96,
+        30 + strength * 76,
+        this.mixColor(color, 0xfff2dc, 0.16),
+        (mobile ? 0.28 : 0.36) * strength + 0.08
+      ).setDepth(depthBase);
+      core.setBlendMode(Phaser.BlendModes.ADD);
       this.scene.tweens.add({
-        targets: bloom,
+        targets: core,
         alpha: 0,
-        scaleX: bloom.scaleX * 1.66,
-        scaleY: bloom.scaleY * 1.48,
-        duration,
+        scaleX: 1.42 + strength * 0.38,
+        scaleY: 1.34 + strength * 0.32,
+        duration: Math.max(80, Math.round(duration * 0.56)),
         ease: 'Quad.out',
         onComplete: () => {
-          bloom.destroy();
-          this.releaseGlow(0.62 + strength * 0.75);
+          core.destroy();
+          this.releaseGlow(coreCost);
         }
       });
     }
 
-    if (this.scene.textures.exists('fx_soft_ring') && this.tryReserveGlow(0.32 + strength * 0.28)) {
-      const flashRing = this.scene.add.image(screenX, screenY, 'fx_soft_ring').setDepth(119).setScrollFactor(0);
-      flashRing.setBlendMode(Phaser.BlendModes.ADD);
-      flashRing.setTint(this.mixColor(color, 0xfff0dc, 0.24));
-      flashRing.setAlpha(strength * 0.28 * (this.fxMul < 0.85 ? 0.86 : 1));
-      flashRing.setScale((cam.width / 128) * 0.2, (cam.height / 128) * 0.2);
+    const hotCost = 0.14 + strength * 0.18;
+    if (this.tryReserveGlow(hotCost)) {
+      const hotCore = this.scene.add.ellipse(
+        x,
+        y,
+        20 + strength * 34,
+        14 + strength * 26,
+        0xffffff,
+        (mobile ? 0.32 : 0.44) * strength + 0.1
+      ).setDepth(depthBase + 1);
+      hotCore.setBlendMode(Phaser.BlendModes.ADD);
       this.scene.tweens.add({
-        targets: flashRing,
+        targets: hotCore,
         alpha: 0,
-        scaleX: flashRing.scaleX * 2.35,
-        scaleY: flashRing.scaleY * 2.06,
-        duration: Math.max(90, Math.round(duration * 0.82)),
-        ease: 'Cubic.out',
-        onComplete: () => {
-          flashRing.destroy();
-          this.releaseGlow(0.32 + strength * 0.28);
-        }
-      });
-    }
-
-    if (this.scene.textures.exists('fx_soft_glow') && this.tryReserveGlow(0.46 + strength * 0.5)) {
-      const screenBloom = this.scene.add.image(cam.width * 0.5, cam.height * 0.5, 'fx_soft_glow').setDepth(117).setScrollFactor(0);
-      screenBloom.setBlendMode(Phaser.BlendModes.ADD);
-      screenBloom.setTint(color);
-      screenBloom.setAlpha(strength * 0.11 * (this.fxMul < 0.85 ? 0.8 : 1));
-      screenBloom.setScale((cam.width / 64) * 0.42, (cam.height / 64) * 0.4);
-      this.scene.tweens.add({
-        targets: screenBloom,
-        alpha: 0,
-        scaleX: screenBloom.scaleX * 1.16,
-        scaleY: screenBloom.scaleY * 1.12,
-        duration: Math.max(80, Math.round(duration * 0.74)),
+        scaleX: 1.24 + strength * 0.24,
+        scaleY: 1.2 + strength * 0.2,
+        duration: Math.max(60, Math.round(duration * 0.4)),
         ease: 'Sine.out',
         onComplete: () => {
-          screenBloom.destroy();
-          this.releaseGlow(0.46 + strength * 0.5);
+          hotCore.destroy();
+          this.releaseGlow(hotCost);
+        }
+      });
+    }
+
+    const ringCost = 0.2 + strength * 0.24;
+    if (this.tryReserveGlow(ringCost)) {
+      const ringColor = this.mixColor(color, 0xfff5de, 0.28);
+      const ring = this.scene.add.ellipse(
+        x,
+        y,
+        24 + strength * 56,
+        16 + strength * 38,
+        ringColor,
+        0
+      ).setDepth(depthBase + 2);
+      ring.setStrokeStyle(Math.max(2, Math.round(2 + strength * 4)), ringColor, (mobile ? 0.46 : 0.58) * strength + 0.06);
+      ring.setBlendMode(Phaser.BlendModes.ADD);
+      this.scene.tweens.add({
+        targets: ring,
+        alpha: 0,
+        scaleX: 2.35 + strength * 0.72,
+        scaleY: 2.08 + strength * 0.58,
+        duration: Math.max(110, Math.round(duration * 0.92)),
+        ease: 'Cubic.out',
+        onComplete: () => {
+          ring.destroy();
+          this.releaseGlow(ringCost);
         }
       });
     }
