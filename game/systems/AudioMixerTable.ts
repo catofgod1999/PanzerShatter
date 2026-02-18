@@ -15,6 +15,8 @@ export const MIXER_TRACKS: MixerTrack[] = [
   { path: "public/sfx/bgm/forest/pre_final_safe_zone/sfx", volumeDb: +0, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
   { path: "public/sfx/bgm/forest/enemy_hunter_intro", volumeDb: +20, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
   { path: "public/sfx/bgm/forest/enemy_hunter_intro/sfx", volumeDb: +0, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
+  { path: "public/sfx/bgm/desert", volumeDb: +1, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
+  { path: "public/sfx/bgm/desert/sfx", volumeDb: +0, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
   { path: "public/sfx/environment", volumeDb: -5, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
   { path: "public/sfx/environment/forest", volumeDb: +0, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },
   { path: "public/sfx/environment/forest/ambient_2d", volumeDb: -18, lowpassHz: 0, highpassHz: 0, pitchCents: 0 },

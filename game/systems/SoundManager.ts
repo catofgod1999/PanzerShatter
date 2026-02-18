@@ -1225,6 +1225,22 @@ export class SoundManager {
     return this.tryDirectFolderLookup(key, folders) !== null;
   }
 
+  public getFolderKeys(prefix?: string): string[] {
+    const folders = this.getFolders();
+    const keys = Object.keys(folders);
+    if (!prefix) return keys.sort();
+    const normalizedPrefix = this.normalizeFolderKey(prefix).toLowerCase();
+    return keys
+      .filter((k) => this.normalizeFolderKey(k).toLowerCase().startsWith(normalizedPrefix))
+      .sort();
+  }
+
+  public getFolderUrls(folderKey: string): string[] {
+    const resolved = this.getUrlsForFolder(folderKey);
+    if (!resolved?.urls?.length) return [];
+    return resolved.urls.slice();
+  }
+
   private rebuildFolderLookup(folders: Record<string, string[]>) {
     if (this.folderLookupSource === folders) return;
     this.folderLookupSource = folders;
@@ -1937,7 +1953,8 @@ export class SoundManager {
       'bgm/forest/combat/sfx',
       'bgm/forest/pre_final_safe_zone/sfx',
       'bgm/forest/enemy_hunter_intro/sfx',
-      'bgm/forest/end/sfx'
+      'bgm/forest/end/sfx',
+      'bgm/desert/sfx'
     ];
 
     if (this.scene.mapId === 'forest') {

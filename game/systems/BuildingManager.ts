@@ -18,6 +18,7 @@ class Building {
     private isIndestructible: boolean = false;
     private detachBudget = 0;
     private allowEnemyInfantrySpawn: boolean;
+    private sandstormLastCollapseAt = Number.NEGATIVE_INFINITY;
 
     private static readonly PARTIAL_COLLAPSE_WINDOW_MS = 1900;
     private static readonly FULL_COLLAPSE_WINDOW_MS = 2200;
@@ -193,6 +194,13 @@ class Building {
             this.heightInBricks * 20 + 200
         );
         return Phaser.Geom.Rectangle.Contains(bounds, x, y);
+    }
+
+    public intersectsXBand(x0: number, x1: number): boolean {
+        if (this.ruined || !this.container.active) return false;
+        const left = this.worldX;
+        const right = this.worldX + this.widthInBricks * 20;
+        return right >= x0 && left <= x1;
     }
 
     public getLineBlockBounds() {
@@ -471,14 +479,65 @@ class Building {
         }
     }
 
+    private partialCollapseBySandstorm(): boolean {
+        if (this.ruined || this.isIndestructible || !this.container.active) return false;
+
+        const active = this.bricks.filter(b => b.active);
+        if (active.length <= 0) return false;
+
+        Phaser.Utils.Array.Shuffle(active);
+        const detachCount = Phaser.Math.Clamp(
+            Math.round(active.length * Phaser.Math.FloatBetween(0.16, 0.34)),
+            8,
+            Math.max(8, Math.floor(active.length * 0.55))
+        );
+
+        let detached = 0;
+        for (let i = 0; i < detachCount; i++) {
+            const brick = active[i];
+            if (!brick?.active) continue;
+            brick.setActive(false).setVisible(false);
+            detached++;
+            const delayMs = Phaser.Math.Between(20, Building.PARTIAL_COLLAPSE_WINDOW_MS);
+            this.releaseBrickAsDebris(brick, "structural", "partial", delayMs);
+        }
+
+        this.detachBudget = Math.min(240, this.detachBudget + detached * 2);
+        const unsupported = this.detachUnsupportedBricks(Math.max(10, Math.floor(detachCount * 0.65)), "ground");
+        const changed = detached + unsupported;
+        if (changed > 0 && !this.ruined) this.playCollapseSfx("partial");
+
+        const structuralBricks = this.bricks.filter(b => (b.getData('gridY') as number) >= 0);
+        const activeCount = structuralBricks.filter(b => b.active).length;
+        if (this.isSupportBroken() || activeCount < structuralBricks.length * 0.45) {
+            this.collapse("structural");
+            return true;
+        }
+
+        return changed > 0;
+    }
+
+    public applySandstormCollapse(now: number, fullChance: number): boolean {
+        if (this.ruined || this.isIndestructible || !this.container.active) return false;
+        if (now < this.sandstormLastCollapseAt + 850) return false;
+        this.sandstormLastCollapseAt = now;
+        if (Math.random() < Phaser.Math.Clamp(fullChance, 0, 1)) {
+            this.collapse("ground");
+            return true;
+        }
+        return this.partialCollapseBySandstorm();
+    }
+
     private collapse(type: "ground" | "structural") {
         if (this.ruined || this.isIndestructible) return;
         this.ruined = true;
         this.scene.allies.spawn(this.worldX - 40, this.worldY, true);
 
         const cx = this.worldX + (this.widthInBricks * 10);
+        const buildingWidthPx = this.widthInBricks * 20;
         this.scene.particles.createConcreteDust(cx, this.worldY, "collapse");
-        this.scene.particles.createBuildingCollapse(cx, this.worldY, this.material, this.widthInBricks * 20);
+        this.scene.particles.createBuildingCollapse(cx, this.worldY, this.material, buildingWidthPx);
+        this.scene.particles.createBuildingGroundContactDust(cx, this.worldY + 6, buildingWidthPx, 1.0);
         this.playCollapseSfx("full");
 
         const activeBricks = this.bricks.filter(b => b.active);
@@ -507,6 +566,30 @@ class Building {
         const halfW = Math.max(1, (this.widthInBricks - 1) * 0.5);
         const maxReleaseDelay = type === "ground" ? 1350 : 1700;
         const dustStep = Math.max(4, Math.floor(sorted.length / 12));
+        const contactPulseCount = Phaser.Math.Clamp(Math.round(this.widthInBricks * 0.6), 3, 9);
+        const contactSpan = Math.max(20, buildingWidthPx / Math.max(1, contactPulseCount));
+
+        for (let i = 0; i < contactPulseCount; i++) {
+            const edgeT = contactPulseCount <= 1 ? 0 : i / (contactPulseCount - 1);
+            const waveT = type === "ground" ? edgeT : (Math.abs(edgeT - 0.5) * 1.15);
+            const delayMs = Phaser.Math.Clamp(
+                Math.round(220 + waveT * maxReleaseDelay + Phaser.Math.Between(0, 220)),
+                160,
+                Building.FULL_COLLAPSE_WINDOW_MS + 260
+            );
+
+            this.scene.time.delayedCall(delayMs, () => {
+                if (this.ruined === false) return;
+                const px = this.worldX + contactSpan * i + contactSpan * 0.5 + Phaser.Math.Between(-8, 8);
+                const gy = this.scene.getTerrainHeight(px);
+                this.scene.particles.createBuildingGroundContactDust(
+                    Phaser.Math.Clamp(px, this.worldX, this.worldX + buildingWidthPx),
+                    gy + 5,
+                    Math.min(120, contactSpan * 1.4),
+                    0.7
+                );
+            });
+        }
 
         sorted.forEach((brick, index) => {
             const gx = brick.getData('gridX') as number;
@@ -538,7 +621,12 @@ class Building {
                     if (!this.container.active) return;
                     const px = this.container.x + brick.x;
                     const py = this.container.y + brick.y;
-                    this.scene.particles.createConcreteDust(px, py + 6, "impact");
+                    const gy = this.scene.getTerrainHeight(px);
+                    const dustY = Math.max(py + 6, gy + 4);
+                    this.scene.particles.createConcreteDust(px, dustY, "impact");
+                    if (py + 20 >= gy) {
+                        this.scene.particles.createBuildingGroundContactDust(px, gy + 5, 76, 0.55);
+                    }
                 });
             }
         });
@@ -585,6 +673,17 @@ export class BuildingManager {
             if (Phaser.Geom.Intersects.LineToRectangle(line, b.getLineBlockBounds())) return true;
         }
         return false;
+    }
+
+    public applySandstormFront(x0: number, x1: number, now: number, fullChance: number = 0.5): number {
+        const left = Math.min(x0, x1);
+        const right = Math.max(x0, x1);
+        let affected = 0;
+        for (const b of this.buildings) {
+            if (!b.intersectsXBand(left, right)) continue;
+            if (b.applySandstormCollapse(now, fullChance)) affected++;
+        }
+        return affected;
     }
 
     public isPointBlocked(x: number, y: number): boolean {

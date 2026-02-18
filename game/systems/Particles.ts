@@ -3801,6 +3801,64 @@ export class ParticleSystems {
       });
   }
 
+  public createBuildingGroundContactDust(
+    x: number,
+    y: number,
+    width: number,
+    intensity: number = 1
+  ) {
+    const widthK = Phaser.Math.Clamp((Math.max(20, width) / 220) * intensity, 0.45, 2.6);
+    if (!this.isNearCamera(x, y, Math.max(260, width * 1.4))) return;
+
+    const roll = this.scene.add.particles(x, y + 6, 'smoke_puff', {
+      speedX: { min: -360 * widthK, max: 360 * widthK },
+      speedY: { min: -44, max: 100 },
+      scale: { start: 0.24 * widthK, end: 1.5 * widthK },
+      alpha: { start: 0.24, end: 0 },
+      lifespan: { min: 900, max: 2300 },
+      quantity: Math.max(8, Math.round(20 * widthK)),
+      emitting: false,
+      tint: [0x8a8178, 0x70675f, 0x575049],
+      gravityY: 240
+    }).setDepth(108);
+    roll.explode();
+    this.applyWindToEmitter(roll as any, y, 0.14);
+
+    const blanket = this.scene.add.particles(x, y + 10, 'smoke_puff', {
+      speedX: { min: -160 * widthK, max: 160 * widthK },
+      speedY: { min: -14, max: 46 },
+      scale: { start: 0.52 * widthK, end: 2.3 * widthK },
+      alpha: { start: 0.14, end: 0 },
+      lifespan: { min: 1200, max: 2800 },
+      quantity: Math.max(5, Math.round(11 * widthK)),
+      emitting: false,
+      tint: [0xa0978a, 0x847b70, 0x6a6259],
+      gravityY: 130
+    }).setDepth(107);
+    blanket.explode();
+    this.applyWindToEmitter(blanket as any, y, 0.08);
+
+    const chips = this.scene.add.particles(x, y + 2, 'brick_concrete', {
+      speed: { min: 70, max: 260 * widthK },
+      angle: { min: 190, max: 350 },
+      scale: { start: 0.16, end: 0.05 },
+      alpha: { start: 0.92, end: 0 },
+      lifespan: { min: 620, max: 1400 },
+      quantity: Math.max(6, Math.round(14 * widthK)),
+      emitting: false,
+      tint: [0x7e7e7e, 0x646464, 0x494949],
+      gravityY: 980,
+      rotate: { min: 0, max: 360 }
+    }).setDepth(110);
+    chips.explode();
+
+    this.scene.time.delayedCall(2900, () => {
+      roll.destroy();
+      blanket.destroy();
+      chips.destroy();
+    });
+  }
+
   public createBuildingCollapse(x: number, y: number, material: string, width: number) {
     const isWood = material.includes('wood');
     const isMetal = material.includes('metal');

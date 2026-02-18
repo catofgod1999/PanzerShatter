@@ -8,6 +8,7 @@ import { InfantryManager } from './systems/InfantryManager';
 import { SoundManager } from './systems/SoundManager';
 import { Helicopter } from './entities/Helicopter';
 import { Animal } from './entities/Animal';
+import { analyzeDesertBgmBuffer, pickDesertSectionAtProgress, type DesertBgmAnalysis, type DesertBgmDesignSection } from './systems/DesertBgmAnalysis';
 
 type MapId = 'forest' | 'desert';
 type ForestBgmState = 'explore' | 'combat' | 'safezone' | 'hunter' | 'end';
@@ -142,6 +143,17 @@ export class MainScene extends Phaser.Scene {
   private allowForestRainThisRun = true;
   private sandstormUntilT = 0;
   private sandstormDir: -1 | 1 = 1;
+  private desertStormFrontX = -420;
+  private desertStormSweepMargin = 110;
+  private desertStormSpeedPxPerSec = 550;
+  private desertStormLastSweepT = 0;
+  private desertEscapeTriggered = false;
+  private desertStormVisual: Phaser.GameObjects.Container | null = null;
+  private desertStormBackdropFar: Phaser.GameObjects.Shape | null = null;
+  private desertStormBackdropNear: Phaser.GameObjects.Shape | null = null;
+  private desertStormEmitters: Phaser.GameObjects.Particles.ParticleEmitter[] = [];
+  private desertStormVisualLastUpdateT = 0;
+  private desertStormVisualStrideMs = 34;
   private forestRainBlend = 0;
   private blackRainZones: { x: number; radius: number; until: number }[] = [];
   private readonly blackRainLoopId = 'amb_black_rain_weather';
@@ -203,6 +215,11 @@ export class MainScene extends Phaser.Scene {
   private lastHunterSpawnTryT = 0;
   private baseRepairStations: { poleX: number; lampY: number; lamp: Phaser.GameObjects.Container; rays: Phaser.GameObjects.Graphics; beamPhase: number; lastSparkAt: number; pole: Phaser.GameObjects.Rectangle; flag: any; collapsed: boolean; loopId: string; spotlightActive: boolean }[] = [];
   private readonly bgmLoopIds: [string, string] = ['bgm_forest_main_a', 'bgm_forest_main_b'];
+  private readonly desertBgmLoopId = 'bgm_desert_main';
+  private desertBgmFolderKey = 'bgm/desert/sfx';
+  private desertBgmAnalysis: DesertBgmAnalysis | null = null;
+  private desertBgmAnalysisCacheKey: string | null = null;
+  private desertBgmAnalysisPromise: Promise<void> | null = null;
   private readonly bgmCombatExitMs = 3000;
   private readonly forestBgmBpm = 97;
   private readonly forestBgmBeatsPerBar = 4;
@@ -380,6 +397,14 @@ export class MainScene extends Phaser.Scene {
     if (this.forestExitZone?.active) this.forestExitZone.destroy();
     this.forestExitZone = null;
     this.forestExitTriggered = false;
+    this.desertStormFrontX = -420;
+    this.desertStormLastSweepT = 0;
+    this.desertEscapeTriggered = false;
+    this.desertStormVisualLastUpdateT = 0;
+    this.clearDesertStormVisuals();
+    this.desertBgmAnalysis = null;
+    this.desertBgmAnalysisCacheKey = null;
+    this.desertBgmAnalysisPromise = null;
 
     this.createAssets();
     Animal.createTextures(this);
@@ -436,6 +461,7 @@ export class MainScene extends Phaser.Scene {
     this.lastSquashCheckT = 0;
     const androidDevice = this.sys.game.device.os.android;
     const mobileDevice = androidDevice || this.sys.game.device.os.iOS || this.sys.game.device.input.touch;
+    this.desertStormVisualStrideMs = androidDevice ? 55 : (mobileDevice ? 45 : 34);
     this.tacticalMapEmitBaseIntervalMs = androidDevice ? 260 : (mobileDevice ? 180 : 120);
     this.tacticalMapEmitIntervalMs = this.tacticalMapEmitBaseIntervalMs;
     this.faunaUpdateIntervalMs = androidDevice ? 50 : (mobileDevice ? 40 : 33);
@@ -483,6 +509,15 @@ export class MainScene extends Phaser.Scene {
     this.terrainFillSprite.setMask(new Phaser.Display.Masks.GeometryMask(this, this.terrainMaskGraphics));
 
     this.groundDecals = this.add.graphics().setDepth(22);
+    if (this.mapId === 'desert') {
+      this.desertBgmFolderKey = this.resolveDesertBgmFolderKey();
+      const urls = this.audio.getFolderUrls(this.desertBgmFolderKey);
+      if (urls.length > 0) {
+        this.desertBgmAnalysisCacheKey = this.getDesertBgmAnalysisCacheKey(this.desertBgmFolderKey, urls);
+        this.desertBgmAnalysis = this.loadCachedDesertBgmAnalysis(this.desertBgmAnalysisCacheKey);
+      }
+      this.beginDesertBgmAnalysis();
+    }
     this.generateTerrain();
     
     if (this.testRoomEnabled) {
@@ -640,6 +675,16 @@ export class MainScene extends Phaser.Scene {
           }
       });
     }
+    else if (this.mapId === 'desert') {
+      const folder = this.desertBgmFolderKey || this.resolveDesertBgmFolderKey();
+      if (this.audio.hasFolderAudio(folder)) {
+        this.audio.startLoop(this.desertBgmLoopId, folder, {
+          volume: 0.9,
+          fadeInMs: 1200,
+          startAtRandomOffset: false
+        }).catch(() => {});
+      }
+    }
 
     this.setupInput();
     this.events.on('prerender', this.handlePreRender, this);
@@ -675,13 +720,7 @@ export class MainScene extends Phaser.Scene {
       this.time.delayedCall(0, () => {
         const now = this.time.now;
         if (this.mapId === 'desert') {
-          const dir: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
-          this.sandstormDir = dir;
-          const dur = 60000;
-          this.sandstormUntilT = now + dur;
-          const mag = Math.max(240, Math.abs(this.wind));
-          this.wind = dir * mag;
-          this.particles.createSandstorm();
+          this.initializeDesertStormScenario(now);
         } else {
           if (this.mapId === 'forest') {
             const shouldRain = this.advanceForestRainCounterAndCheck();
@@ -2770,27 +2809,29 @@ export class MainScene extends Phaser.Scene {
     const sunY = 320 + atmosphereOffsetY;
     const sunX = 1000;
     const desert = this.mapId === 'desert';
-    const sunRay = this.add.graphics().setScrollFactor(0.002).setDepth(1.55);
-    const rayCount = desert ? 16 : 18;
-    const rayInner = desert ? 164 : 132;
-    const rayOuter = desert ? 338 : 304;
-    const rayColor = desert ? 0xffc56b : 0xff9f68;
-    sunRay.fillStyle(rayColor, desert ? 0.11 : 0.1);
-    for (let i = 0; i < rayCount; i++) {
-      const a = (i / rayCount) * Math.PI * 2 + ((i % 2 === 0) ? 0.018 : -0.032);
-      const spread = desert ? Math.PI / 20 : Math.PI / 22;
-      const x0 = sunX + Math.cos(a - spread) * rayInner;
-      const y0 = sunY + Math.sin(a - spread) * rayInner;
-      const x1 = sunX + Math.cos(a + spread) * rayInner;
-      const y1 = sunY + Math.sin(a + spread) * rayInner;
-      const x2 = sunX + Math.cos(a) * rayOuter;
-      const y2 = sunY + Math.sin(a) * rayOuter;
-      sunRay.beginPath();
-      sunRay.moveTo(x0, y0);
-      sunRay.lineTo(x2, y2);
-      sunRay.lineTo(x1, y1);
-      sunRay.closePath();
-      sunRay.fillPath();
+    if (!desert) {
+      const sunRay = this.add.graphics().setScrollFactor(0.002).setDepth(1.55);
+      const rayCount = 18;
+      const rayInner = 132;
+      const rayOuter = 304;
+      const rayColor = 0xff9f68;
+      sunRay.fillStyle(rayColor, 0.1);
+      for (let i = 0; i < rayCount; i++) {
+        const a = (i / rayCount) * Math.PI * 2 + ((i % 2 === 0) ? 0.018 : -0.032);
+        const spread = Math.PI / 22;
+        const x0 = sunX + Math.cos(a - spread) * rayInner;
+        const y0 = sunY + Math.sin(a - spread) * rayInner;
+        const x1 = sunX + Math.cos(a + spread) * rayInner;
+        const y1 = sunY + Math.sin(a + spread) * rayInner;
+        const x2 = sunX + Math.cos(a) * rayOuter;
+        const y2 = sunY + Math.sin(a) * rayOuter;
+        sunRay.beginPath();
+        sunRay.moveTo(x0, y0);
+        sunRay.lineTo(x2, y2);
+        sunRay.lineTo(x1, y1);
+        sunRay.closePath();
+        sunRay.fillPath();
+      }
     }
     const sunGlow = this.add.graphics().setScrollFactor(0.002).setDepth(1.78);
     if (desert) {
@@ -3015,19 +3056,243 @@ export class MainScene extends Phaser.Scene {
     this.drawTerrain();
   }
 
+  private getDesertSectionAtX(worldX: number): DesertBgmDesignSection | null {
+    if (!this.desertBgmAnalysis) return null;
+    const width = Math.max(1, this.WORLD_WIDTH);
+    const progress = Phaser.Math.Clamp(worldX / width, 0, 0.999999);
+    return pickDesertSectionAtProgress(this.desertBgmAnalysis, progress);
+  }
+
   private generateDesertTerrain() {
     this.terrainHeights = []; this.baseHeights = []; this.terrainDamage = [];
     this.terrainBurn = [];
-    const minH = 72; const maxH = 576; const centerH = 400; 
+    const minH = 58; const maxH = 628; const centerH = 392;
+    let prev = centerH;
+    const secCount = Math.max(8, this.desertBgmAnalysis?.sections?.length ?? 12);
+    const secSpan = Math.max(260, this.WORLD_WIDTH / secCount);
     for (let x = 0; x <= this.WORLD_WIDTH; x += this.TERRAIN_STEP) {
-      const n1 = Math.sin(x * 0.002) * 140; 
-      const n2 = Math.sin(x * 0.005) * 60; 
-      const n3 = Math.sin(x * 0.015) * 20;
-      let val = Phaser.Math.Clamp(centerH + n1 + n2 + n3, minH, maxH);
+      const sec = this.getDesertSectionAtX(x);
+      const terrainRelief = sec?.terrainRelief ?? 0.5;
+      const terrainRhythm = sec?.terrainRhythm ?? 0.45;
+      const enemyPressure = sec?.enemyPressure ?? 0.45;
+      const synthDrive = sec?.synthDrive ?? 0.4;
+      const stringLift = sec?.stringLift ?? 0.35;
+      const sectionIndex = sec?.index ?? 0;
+      const rhythmT = Phaser.Math.Clamp(terrainRhythm * 0.72 + synthDrive * 0.28, 0, 1);
+      const dynamicT = Phaser.Math.Clamp(terrainRelief * 0.58 + enemyPressure * 0.42, 0, 1);
+      const secPos = ((x / secSpan) + sectionIndex * 0.17) % 1;
+      const secTri = 1 - Math.abs(secPos * 2 - 1);
+      const secGate = Math.pow(secTri, Phaser.Math.Linear(3.6, 0.8, rhythmT));
+
+      const n1Amp = Phaser.Math.Linear(190, 360, terrainRelief);
+      const n2Amp = Phaser.Math.Linear(120, 220, rhythmT);
+      const n3Amp = Phaser.Math.Linear(45, 145, enemyPressure);
+      const ridgeAmp = Phaser.Math.Linear(40, 130, stringLift);
+      const beatAmp = Phaser.Math.Linear(70, 220, rhythmT) * Phaser.Math.Linear(1.0, 1.35, dynamicT);
+      const phraseAmp = Phaser.Math.Linear(40, 160, stringLift);
+      const stepAmp = Phaser.Math.Linear(32, 132, rhythmT);
+      const chopAmp = Phaser.Math.Linear(24, 96, enemyPressure);
+
+      const n1Freq = Phaser.Math.Linear(0.0012, 0.0032, rhythmT);
+      const n2Freq = Phaser.Math.Linear(0.0048, 0.0115, rhythmT);
+      const n3Freq = Phaser.Math.Linear(0.014, 0.032, synthDrive);
+      const ridgeFreq = Phaser.Math.Linear(0.00075, 0.0022, enemyPressure);
+      const beatFreq = Phaser.Math.Linear(0.011, 0.026, terrainRhythm);
+      const phraseFreq = Phaser.Math.Linear(0.0018, 0.0054, terrainRhythm);
+
+      const n1 = Math.sin(x * n1Freq + terrainRelief * 3.1) * n1Amp;
+      const n2 = Math.sin(x * n2Freq + terrainRhythm * 5.8) * n2Amp;
+      const n3 = Math.sin(x * n3Freq + synthDrive * 7.2) * n3Amp;
+      const ridges = Math.sin(x * ridgeFreq + sectionIndex) * ridgeAmp;
+
+      const beatBase = Math.sin(x * beatFreq + sectionIndex * 0.92 + synthDrive * 4.4);
+      const beatPulse = Math.sign(beatBase) * Math.pow(Math.abs(beatBase), Phaser.Math.Linear(1.8, 0.75, terrainRhythm));
+      const beatAccent = Math.sin(x * beatFreq * 2.04 + sectionIndex * 1.73 + enemyPressure * 6.2);
+      const beatContour = (beatPulse * 0.78 + beatAccent * 0.22) * beatAmp;
+
+      const phraseBase = Math.sin(x * phraseFreq + sectionIndex * 1.26 + stringLift * 4.2);
+      const phraseTri = Math.asin(phraseBase) / (Math.PI * 0.5);
+      const phraseContour = phraseTri * phraseAmp;
+
+      const stepContour = (secGate * 2 - 1) * stepAmp;
+      const chopBase = Math.sin(x * beatFreq * 3.4 + sectionIndex * 2.1 + synthDrive * 8.8);
+      const chopContour = Math.sign(chopBase) * Math.pow(Math.abs(chopBase), Phaser.Math.Linear(1.2, 0.55, rhythmT)) * chopAmp;
+      const sectionSwing = Math.sin(sectionIndex * 1.37 + stringLift * 5.1) * Phaser.Math.Linear(22, 96, dynamicT);
+
+      let val = centerH + n1 + n2 + n3 + ridges + beatContour + phraseContour + stepContour + chopContour + sectionSwing;
+      const quantStep = Phaser.Math.Linear(6, 30, rhythmT);
+      val = Math.round(val / quantStep) * quantStep;
+      const maxDelta = Phaser.Math.Linear(48, 86, rhythmT);
+      const d = val - prev;
+      if (d > maxDelta) val = prev + maxDelta;
+      else if (d < -maxDelta) val = prev - maxDelta;
+      prev = Phaser.Math.Clamp(val, minH, maxH);
+      val = prev;
+
       this.terrainHeights.push(val); this.baseHeights.push(val); this.terrainDamage.push(0);
       this.terrainBurn.push(0);
     }
+    for (let pass = 0; pass < 1; pass++) {
+      const src = this.terrainHeights;
+      const smoothed = src.slice();
+      for (let i = 1; i < src.length - 1; i++) {
+        smoothed[i] = Phaser.Math.Clamp((src[i - 1] * 0.16 + src[i] * 0.68 + src[i + 1] * 0.16), minH, maxH);
+      }
+      this.terrainHeights = smoothed;
+    }
+    this.baseHeights = this.terrainHeights.slice();
     this.drawTerrain();
+  }
+
+  private resolveDesertBgmFolderKey(): string {
+    const preferred = 'bgm/desert/sfx';
+    if (this.audio?.hasFolderAudio(preferred)) return preferred;
+    const keys = this.audio?.getFolderKeys('bgm/desert') ?? [];
+    if (!keys.length) return preferred;
+    const sfxKey = keys.find((k) => k.endsWith('/sfx'));
+    return sfxKey ?? keys[0];
+  }
+
+  private getDesertBgmAnalysisCacheKey(folderKey: string, urls: string[]): string {
+    const shortSig = urls.slice(0, 6).join('|');
+    return `panzer-desert-bgm-analysis-v2:${folderKey}:${shortSig}`;
+  }
+
+  private loadCachedDesertBgmAnalysis(cacheKey: string): DesertBgmAnalysis | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(cacheKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as DesertBgmAnalysis;
+      if (!parsed || !Array.isArray(parsed.sections) || !Array.isArray(parsed.timeline)) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private buildDesertBgmReport(analysis: DesertBgmAnalysis) {
+    const dynamicCurve = analysis.timeline.map((p) => ({
+      timeSec: Number(p.timeSec.toFixed(2)),
+      intensity: Number(p.intensity.toFixed(3))
+    }));
+
+    const drumDensityRanges = analysis.sections.map((section) => ({
+      index: section.index,
+      startSec: Number(section.startSec.toFixed(2)),
+      endSec: Number(section.endSec.toFixed(2)),
+      drumDensity: Number(section.drumDensity.toFixed(3))
+    }));
+
+    const synthBands = analysis.sections.map((section) => ({
+      index: section.index,
+      synthDrive: Number(section.synthDrive.toFixed(3)),
+      terrainRhythm: Number(section.terrainRhythm.toFixed(3))
+    }));
+
+    const stringBursts = analysis.sections
+      .filter((section) => section.stringLift >= 0.58)
+      .map((section) => ({
+        index: section.index,
+        startSec: Number(section.startSec.toFixed(2)),
+        endSec: Number(section.endSec.toFixed(2)),
+        stringLift: Number(section.stringLift.toFixed(3)),
+        label: section.label
+      }));
+
+    const levelDesignSections = analysis.sections.map((section) => ({
+      index: section.index,
+      startSec: Number(section.startSec.toFixed(2)),
+      endSec: Number(section.endSec.toFixed(2)),
+      terrainRelief: Number(section.terrainRelief.toFixed(3)),
+      enemyPressure: Number(section.enemyPressure.toFixed(3)),
+      lowHpBias: Number(section.lowHpBias.toFixed(3)),
+      vegetationDensity: Number(section.vegetationDensity.toFixed(3)),
+      label: section.label
+    }));
+
+    return {
+      durationSec: Number(analysis.durationSec.toFixed(2)),
+      dynamicCurve,
+      drumDensityRanges,
+      synthBands,
+      stringBursts,
+      levelDesignSections
+    };
+  }
+
+  private emitDesertBgmAnalysisReport(folderKey: string, sourceUrl: string, fromCache: boolean) {
+    if (typeof window === 'undefined' || !this.desertBgmAnalysis) return;
+    const report = this.buildDesertBgmReport(this.desertBgmAnalysis);
+    window.dispatchEvent(new CustomEvent('panzer-desert-bgm-analysis', {
+      detail: {
+        folderKey,
+        sourceUrl,
+        fromCache,
+        report
+      }
+    }));
+  }
+
+  private async analyzeDesertBgmFromUrl(url: string): Promise<DesertBgmAnalysis | null> {
+    const normalizedUrl = url.startsWith('/') ? url : `/${url.replace(/^\/+/, '')}`;
+    const response = await fetch(normalizedUrl, { cache: 'no-store' });
+    if (!response.ok) return null;
+    const audioData = await response.arrayBuffer();
+
+    let decodeContext = (this.sound as any)?.context as AudioContext | undefined;
+    let ownedContext: AudioContext | null = null;
+    if (!decodeContext && typeof window !== 'undefined') {
+      const Ctx = (window.AudioContext || (window as any).webkitAudioContext) as (new () => AudioContext) | undefined;
+      if (Ctx) {
+        ownedContext = new Ctx();
+        decodeContext = ownedContext;
+      }
+    }
+    if (!decodeContext) return null;
+
+    try {
+      const decoded = await decodeContext.decodeAudioData(audioData.slice(0));
+      return analyzeDesertBgmBuffer(decoded);
+    } finally {
+      if (ownedContext) {
+        ownedContext.close().catch(() => {});
+      }
+    }
+  }
+
+  private beginDesertBgmAnalysis() {
+    if (this.mapId !== 'desert' || this.testRoomEnabled || this.tutorialMode) return;
+    if (!this.audio) return;
+    if (this.desertBgmAnalysisPromise) return;
+
+    this.desertBgmFolderKey = this.resolveDesertBgmFolderKey();
+    const urls = this.audio.getFolderUrls(this.desertBgmFolderKey);
+    if (!urls.length) return;
+
+    const cacheKey = this.getDesertBgmAnalysisCacheKey(this.desertBgmFolderKey, urls);
+    this.desertBgmAnalysisCacheKey = cacheKey;
+    if (!this.desertBgmAnalysis) {
+      this.desertBgmAnalysis = this.loadCachedDesertBgmAnalysis(cacheKey);
+      if (this.desertBgmAnalysis) {
+        this.emitDesertBgmAnalysisReport(this.desertBgmFolderKey, urls[0], true);
+      }
+    }
+
+    const sourceUrl = urls[0];
+    this.desertBgmAnalysisPromise = (async () => {
+      try {
+        const analysis = await this.analyzeDesertBgmFromUrl(sourceUrl);
+        if (!analysis) return;
+        this.desertBgmAnalysis = analysis;
+        if (typeof window !== 'undefined' && this.desertBgmAnalysisCacheKey) {
+          try { window.localStorage.setItem(this.desertBgmAnalysisCacheKey, JSON.stringify(analysis)); } catch {}
+        }
+        this.emitDesertBgmAnalysisReport(this.desertBgmFolderKey, sourceUrl, false);
+      } catch {}
+    })().finally(() => {
+      this.desertBgmAnalysisPromise = null;
+    });
   }
 
   private computeVehicleKillPointsByHp(basePoints: number, source?: any): number {
@@ -4483,11 +4748,37 @@ export class MainScene extends Phaser.Scene {
     this.forestLakeBridgePlan = null;
   }
 
+  private pickWeightedTankType(entries: { type: TankType; weight: number }[], fallback: TankType = TankType.ENEMY_PANZER): TankType {
+    let total = 0;
+    for (let i = 0; i < entries.length; i++) total += Math.max(0, entries[i].weight);
+    if (!(total > 0)) return fallback;
+    let roll = Math.random() * total;
+    for (let i = 0; i < entries.length; i++) {
+      roll -= Math.max(0, entries[i].weight);
+      if (roll <= 0) return entries[i].type;
+    }
+    return entries[entries.length - 1]?.type ?? fallback;
+  }
+
+  private pickDesertTankTypeForX(worldX: number): TankType {
+    const sec = this.getDesertSectionAtX(worldX);
+    const pressure = sec ? Phaser.Math.Clamp(sec.enemyPressure, 0, 1) : 0.55;
+    const lowHpBias = sec ? Phaser.Math.Clamp(sec.lowHpBias, 0, 1) : 0.72;
+    const synth = sec ? Phaser.Math.Clamp(sec.synthDrive, 0, 1) : 0.45;
+    const weights = [
+      { type: TankType.ENEMY_LUCHS, weight: 3.4 + lowHpBias * 3.2 + pressure * 0.8 },
+      { type: TankType.ENEMY_PANZER, weight: 3.1 + lowHpBias * 2.9 + pressure * 0.9 },
+      { type: TankType.ENEMY_STUG, weight: 1.6 + lowHpBias * 1.4 + pressure * 0.6 },
+      { type: TankType.ENEMY_TUMBLEWEED, weight: 1.2 + lowHpBias * 0.7 + synth * 1.1 },
+      { type: TankType.ENEMY_TIGER, weight: 0.5 + pressure * 0.9 },
+      { type: TankType.ENEMY_A7V, weight: 0.34 + pressure * 0.5 },
+      { type: TankType.ENEMY_MAUS, weight: 0.08 + pressure * 0.2 }
+    ];
+    return this.pickWeightedTankType(weights, TankType.ENEMY_PANZER);
+  }
+
   private spawnContentInRange(fromX: number, toX: number) {
     const baseTankTypes = [TankType.ENEMY_TIGER, TankType.ENEMY_PANZER, TankType.ENEMY_STUG, TankType.ENEMY_A7V, TankType.ENEMY_LUCHS, TankType.ENEMY_MAUS];
-    const tankTypes = this.mapId === 'desert'
-      ? [...baseTankTypes, TankType.ENEMY_TUMBLEWEED, TankType.ENEMY_TUMBLEWEED]
-      : baseTankTypes;
 
     if (this.mapId === 'forest' && this.forestLakeBridgeWantedThisRun && !this.forestLakeBridgeSpawnedThisRun && this.forestLakeBridgePlan) {
       const { start, end } = this.forestLakeBridgePlan;
@@ -4533,6 +4824,10 @@ export class MainScene extends Phaser.Scene {
       const safe = this.isInSafeZone(x);
       const forestBand = (Math.sin(x * 0.00115) + Math.sin(x * 0.00043 + 12.34)) * 0.5;
       const isForest = this.mapId !== 'desert' && forestBand > 0.35;
+      const desertSection = this.mapId === 'desert' ? this.getDesertSectionAtX(x) : null;
+      const desertEnemyPressure = desertSection ? Phaser.Math.Clamp(desertSection.enemyPressure, 0, 1) : 0.55;
+      const desertVegetation = desertSection ? Phaser.Math.Clamp(desertSection.vegetationDensity, 0, 1) : 0.5;
+      const desertSynthDrive = desertSection ? Phaser.Math.Clamp(desertSection.synthDrive, 0, 1) : 0.45;
 
       if (safe) {
           if (x % 2000 < 30) {
@@ -4549,7 +4844,8 @@ export class MainScene extends Phaser.Scene {
       }
 
     if (this.mapId === 'desert') {
-        if (x % 5500 < 30 && x > 8000 && !safe && Math.random() > 0.2) {
+        const lakeGate = Phaser.Math.Linear(0.30, 0.18, desertEnemyPressure);
+        if (x % 5500 < 30 && x > 8000 && !safe && Math.random() > lakeGate) {
           const start = x + Phaser.Math.Between(800, 1400);
           const end = start + Phaser.Math.Between(2000, 3400);
           this.createLakeWithBridge(start, end);
@@ -4558,11 +4854,13 @@ export class MainScene extends Phaser.Scene {
 
       if (this.mapId === 'desert') {
           // Desert Vegetation
-           if (!this.isWaterAt(x) && rand < 0.20 && x > 400 && !safe) {
+           const vegChance = Phaser.Math.Clamp(Phaser.Math.Linear(0.11, 0.28, desertVegetation), 0.08, 0.32);
+           if (!this.isWaterAt(x) && rand < vegChance && x > 400 && !safe) {
               const makeOne = (sx: number) => {
                 if (this.isWaterAt(sx)) return;
                 const sh = this.getTerrainHeight(sx);
-                const asset = Math.random() > 0.80 ? 'veg_cactus' : 'veg_grass';
+                const cactusChance = Phaser.Math.Linear(0.14, 0.5, desertSynthDrive);
+                const asset = Math.random() < cactusChance ? 'veg_cactus' : 'veg_grass';
                 const veg = this.add.sprite(sx, sh, asset)
                   .setOrigin(0.5, 1)
                   .setDepth(14 + Math.random() * 0.08)
@@ -4581,8 +4879,10 @@ export class MainScene extends Phaser.Scene {
               };
 
               makeOne(x);
-              if (rand < 0.06) makeOne(x + Phaser.Math.Between(-22, 22));
-              if (rand < 0.02) makeOne(x + Phaser.Math.Between(-34, 34));
+              const clusterChanceA = Phaser.Math.Linear(0.03, 0.18, desertVegetation);
+              const clusterChanceB = Phaser.Math.Linear(0.01, 0.08, desertVegetation);
+              if (rand < clusterChanceA) makeOne(x + Phaser.Math.Between(-22, 22));
+              if (rand < clusterChanceB) makeOne(x + Phaser.Math.Between(-34, 34));
            }
       } else {
           // Forest Vegetation
@@ -4651,7 +4951,8 @@ export class MainScene extends Phaser.Scene {
             this.animals.push(animal);
           }
       } else {
-          if (!safe && x > 800 && !this.isWaterAt(x) && !this.isSwampAt(x) && Math.random() < 0.00825) {
+          const faunaChance = Phaser.Math.Clamp(Phaser.Math.Linear(0.0105, 0.0035, desertEnemyPressure), 0.003, 0.011);
+          if (!safe && x > 800 && !this.isWaterAt(x) && !this.isSwampAt(x) && Math.random() < faunaChance) {
             const roll = Math.random();
             const type = roll < 0.45 ? 'scorpion' : 'snake';
             const animal = new Animal(this, x, h - 18, type);
@@ -4662,7 +4963,21 @@ export class MainScene extends Phaser.Scene {
 
       if (x % 1500 < 30 && !safe && x > 3000) { 
           const blockVehiclesAfterHunterSpawn = this.hunterSpawned && Number.isFinite(this.hunterSpawnX) && x > this.hunterSpawnX;
-          if (Math.random() > 0.4) {
+          const mobile = this.sys.game.device.os.android || this.sys.game.device.os.iOS || this.sys.game.device.input.touch;
+          const desertVehicleCap = this.mapId === 'desert' ? (mobile ? 28 : 46) : Number.POSITIVE_INFINITY;
+          const desertInfantryCap = this.mapId === 'desert' ? (mobile ? 44 : 68) : Number.POSITIVE_INFINITY;
+          const activeVehicleCount = this.mapId === 'desert'
+            ? this.enemies.reduce((sum, e) => sum + (e?.active ? 1 : 0), 0)
+            : 0;
+          const activeEnemyInfantryCount = this.mapId === 'desert'
+            ? this.enemyInfantry.soldiers.reduce((sum, s) => sum + (s?.active ? 1 : 0), 0)
+            : 0;
+          const allowDesertVehicleSpawn = this.mapId !== 'desert' || activeVehicleCount < desertVehicleCap;
+          const allowDesertInfantrySpawn = this.mapId !== 'desert' || activeEnemyInfantryCount < desertInfantryCap;
+          const buildGate = this.mapId === 'desert'
+            ? Phaser.Math.Linear(0.62, 0.2, desertSynthDrive)
+            : 0.4;
+          if (Math.random() > buildGate) {
             let style = 0;
             if (this.mapId === 'desert') {
                  style = 3; // MIDDLE_EAST
@@ -4675,18 +4990,29 @@ export class MainScene extends Phaser.Scene {
             const bx = findDryX(x, 1);
             if (bx !== null) this.buildings.createBuilding(bx, this.getTerrainHeight(bx), style);
           }
-          if (!blockVehiclesAfterHunterSpawn && Math.random() > 0.325) {
+          const vehicleGate = this.mapId === 'desert'
+            ? Phaser.Math.Linear(0.68, 0.12, desertEnemyPressure)
+            : 0.325;
+          if (!blockVehiclesAfterHunterSpawn && allowDesertVehicleSpawn && Math.random() > vehicleGate) {
               const wantX = x + 800;
               const tx = findDryX(wantX, Math.random() > 0.5 ? 1 : -1);
-              if (tx === null) { this.enemyInfantry.spawn(x + 500, h); return; }
-              const tankType = tankTypes[Math.floor(Math.random()*tankTypes.length)];
+              if (tx === null) {
+                if (allowDesertInfantrySpawn) this.enemyInfantry.spawn(x + 500, h);
+                continue;
+              }
+              const tankType = this.mapId === 'desert'
+                ? this.pickDesertTankTypeForX(tx)
+                : baseTankTypes[Math.floor(Math.random() * baseTankTypes.length)];
               const scale = Tank.getScaleFor(tankType, false);
               const enemy = new Tank(this, tx, this.getGroundHeight(tx) - 150 * scale, tankType);
               enemy.chassis.setData('tankRef', enemy);
               this.enemies.push(enemy);
               this.enemiesGroup.add(enemy.chassis);
           }
-          if (!blockVehiclesAfterHunterSpawn && Math.random() > 0.2) {
+          const subGate = this.mapId === 'desert'
+            ? Phaser.Math.Linear(0.42, 0.12, desertEnemyPressure)
+            : 0.2;
+          if (!blockVehiclesAfterHunterSpawn && allowDesertVehicleSpawn && Math.random() > subGate) {
               const wantX = x + 520;
               const cx = findDryX(wantX, Math.random() > 0.5 ? 1 : -1);
               if (cx !== null) {
@@ -4696,14 +5022,16 @@ export class MainScene extends Phaser.Scene {
                 this.physics.add.overlap(this.mineGroup, sub, (mineObj: any, enemyObj: any) => this.handleMineTrigger(mineObj, enemyObj));
               }
           }
-          if (!blockVehiclesAfterHunterSpawn && x % 6000 < 30) {
+          if (!blockVehiclesAfterHunterSpawn && allowDesertVehicleSpawn && x % 6000 < 30 && (this.mapId !== 'desert' || Math.random() < Phaser.Math.Linear(0.16, 0.32, desertEnemyPressure))) {
               const heli = new Helicopter(this, x + 2000, -600);
               this.enemies.push(heli);
               this.physics.add.overlap(this.mineGroup, heli, (mineObj: any, enemyObj: any) => this.handleMineTrigger(mineObj, enemyObj));
           }
-          const ix = findDryX(x + 500, 1);
-          if (ix !== null) this.enemyInfantry.spawn(ix, this.getGroundHeight(ix));
-          else this.enemyInfantry.spawn(x + 500, h);
+          if (allowDesertInfantrySpawn) {
+            const ix = findDryX(x + 500, 1);
+            if (ix !== null) this.enemyInfantry.spawn(ix, this.getGroundHeight(ix));
+            else this.enemyInfantry.spawn(x + 500, h);
+          }
       }
     }
   }
@@ -7013,6 +7341,343 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  private clearDesertStormVisuals() {
+    for (let i = 0; i < this.desertStormEmitters.length; i++) {
+      const emitter = this.desertStormEmitters[i];
+      if (!emitter?.active) continue;
+      try { emitter.stop?.(); } catch {}
+      try { emitter.destroy(); } catch {}
+    }
+    this.desertStormEmitters = [];
+
+    if (this.desertStormVisual?.active) this.desertStormVisual.destroy(true);
+    this.desertStormVisual = null;
+
+    if (this.desertStormBackdropFar?.active) this.desertStormBackdropFar.destroy();
+    this.desertStormBackdropFar = null;
+    if (this.desertStormBackdropNear?.active) this.desertStormBackdropNear.destroy();
+    this.desertStormBackdropNear = null;
+  }
+
+  private initializeDesertStormScenario(now: number) {
+    if (this.mapId !== 'desert') return;
+    const estimatedPlayerShiftBoostSpeed = 180 * 2 * 1.8;
+    this.desertStormSpeedPxPerSec = estimatedPlayerShiftBoostSpeed * 0.85;
+    this.sandstormDir = 1;
+    this.sandstormUntilT = Number.POSITIVE_INFINITY;
+    this.desertStormFrontX = -420;
+    this.desertStormLastSweepT = now;
+    this.desertStormVisualLastUpdateT = 0;
+    this.desertEscapeTriggered = false;
+    this.wind = Math.max(240, Math.abs(this.wind));
+    this.ensureDesertStormVisual();
+  }
+
+  private ensureDesertStormVisual() {
+    if (this.desertStormVisual?.active) return;
+    const worldTop = this.physics.world.bounds.top;
+    const worldHeight = this.physics.world.bounds.height;
+    const yCenter = worldTop + worldHeight * 0.5;
+    const android = this.sys.game.device.os.android;
+    const mobile = android || this.sys.game.device.os.iOS || this.sys.game.device.input.touch;
+    const wall = this.add.container(this.desertStormFrontX, yCenter).setDepth(94);
+
+    const shadow = this.add.rectangle(-760, 0, 1960, worldHeight + 1220, 0x1b1008, 0.44).setOrigin(0.5);
+    const coreA = this.add.rectangle(-360, 0, 1560, worldHeight + 1060, 0x5e3415, 0.42).setOrigin(0.5);
+    const coreB = this.add.rectangle(-60, 0, 1240, worldHeight + 980, 0x8b4e1f, 0.40).setOrigin(0.5);
+    const dustA = this.add.rectangle(200, 0, 920, worldHeight + 920, 0xaf652b, 0.36).setOrigin(0.5);
+    const dustB = this.add.rectangle(360, 0, 620, worldHeight + 860, 0xcf8340, 0.34).setOrigin(0.5);
+    const edge = this.add.ellipse(450, 0, 420, worldHeight + 760, 0xf0b575, 0.42).setOrigin(0.5);
+    const frontDense = this.add.ellipse(500, 0, 260, worldHeight + 700, 0xffddb1, 0.52).setOrigin(0.5);
+    const swirlA = this.add.ellipse(140, -230, 840, 460, 0xc8752e, 0.22).setOrigin(0.5).setAngle(-14);
+    const swirlB = this.add.ellipse(10, 240, 880, 500, 0xaa6127, 0.2).setOrigin(0.5).setAngle(12);
+
+    const clumps: Phaser.GameObjects.Shape[] = [];
+    const clumpCount = mobile ? 10 : 14;
+    for (let i = 0; i < clumpCount; i++) {
+      const cx = 70 + i * 38 + Phaser.Math.Between(-45, 45);
+      const cy = Phaser.Math.Between(-520, 520);
+      const w = Phaser.Math.Between(150, 360);
+      const h = Phaser.Math.Between(120, 280);
+      const a = Phaser.Math.FloatBetween(0.12, 0.26);
+      const c = i % 2 === 0 ? 0xca7d35 : 0xb9692d;
+      const clump = this.add.ellipse(cx, cy, w, h, c, a).setOrigin(0.5);
+      clump.setData('baseX', cx);
+      clump.setData('ampX', Phaser.Math.FloatBetween(8, 24));
+      clump.setData('phase', Phaser.Math.FloatBetween(0, Math.PI * 2));
+      clumps.push(clump);
+    }
+
+    wall.add([shadow, coreA, coreB, dustA, dustB, swirlA, swirlB, edge, frontDense, ...clumps]);
+    wall.setData('shadow', shadow);
+    wall.setData('coreA', coreA);
+    wall.setData('coreB', coreB);
+    wall.setData('dustA', dustA);
+    wall.setData('dustB', dustB);
+    wall.setData('edge', edge);
+    wall.setData('frontDense', frontDense);
+    wall.setData('swirlA', swirlA);
+    wall.setData('swirlB', swirlB);
+    wall.setData('clumps', clumps);
+    this.desertStormVisual = wall;
+
+    this.desertStormBackdropFar = null;
+    this.desertStormBackdropNear = null;
+
+    const smokeKey = this.textures.exists('smoke_puff')
+      ? 'smoke_puff'
+      : (this.textures.exists('cloud_0') ? 'cloud_0' : this.textures.getTextureKeys()[0]);
+    const grainKey = this.textures.exists('fx_sand_grain') ? 'fx_sand_grain' : smokeKey;
+    const ashFrequency = mobile ? 42 : 30;
+    const ashQuantity = mobile ? 2 : 3;
+    const grainFrequency = mobile ? 28 : 18;
+    const grainQuantity = mobile ? 2 : 3;
+    const chunkFrequency = mobile ? 68 : 46;
+    const chunkQuantity = mobile ? 1 : 2;
+    const streakFrequency = mobile ? 30 : 20;
+    const streakQuantity = mobile ? 1 : 2;
+    const densityScale = mobile ? 0.88 : 1.0;
+
+    const ashLayer = this.add.particles(this.desertStormFrontX - 200, yCenter, smokeKey, {
+      x: { min: -260, max: 180 },
+      y: { min: -1060, max: 1060 },
+      lifespan: { min: 2200, max: 4800 },
+      frequency: ashFrequency,
+      quantity: ashQuantity,
+      maxParticles: mobile ? 92 : 150,
+      scale: { start: 2.8 * densityScale, end: 8.8 * densityScale },
+      alpha: { start: 0.56, end: 0 },
+      tint: [0xe0bd86, 0xc6823d, 0x8e4d20],
+      speedX: { min: 220, max: 540 },
+      speedY: { min: -160, max: 160 }
+    }).setDepth(96);
+
+    const grainLayer = this.add.particles(this.desertStormFrontX - 40, yCenter, grainKey, {
+      x: { min: -200, max: 160 },
+      y: { min: -960, max: 960 },
+      lifespan: { min: 900, max: 1900 },
+      frequency: grainFrequency,
+      quantity: grainQuantity,
+      maxParticles: mobile ? 120 : 210,
+      scale: { start: 1.2 * densityScale, end: 0.25 * densityScale },
+      alpha: { start: 0.9, end: 0 },
+      tint: [0xffefc4, 0xeec688, 0xc57b38],
+      speedX: { min: 300, max: 760 },
+      speedY: { min: -240, max: 240 },
+      rotate: { min: 0, max: 360 }
+    }).setDepth(97);
+
+    const chunkLayer = this.add.particles(this.desertStormFrontX + 120, yCenter, smokeKey, {
+      x: { min: -120, max: 100 },
+      y: { min: -900, max: 900 },
+      lifespan: { min: 1300, max: 2600 },
+      frequency: chunkFrequency,
+      quantity: chunkQuantity,
+      maxParticles: mobile ? 52 : 84,
+      scale: { start: 1.5 * densityScale, end: 4.2 * densityScale },
+      alpha: { start: 0.32, end: 0 },
+      tint: [0xf2bf80, 0xd48843, 0xa95e26],
+      speedX: { min: 260, max: 620 },
+      speedY: { min: -180, max: 180 }
+    }).setDepth(98);
+    const streakKey = this.textures.exists('fx_sand_streak_0')
+      ? `fx_sand_streak_${Phaser.Math.Between(0, 2)}`
+      : grainKey;
+    const streakLayer = this.add.particles(this.desertStormFrontX + 160, yCenter, streakKey, {
+      x: { min: -180, max: 140 },
+      y: { min: -980, max: 980 },
+      lifespan: { min: 540, max: 1250 },
+      frequency: streakFrequency,
+      quantity: streakQuantity,
+      maxParticles: mobile ? 78 : 130,
+      scale: { start: 0.95 * densityScale, end: 0.2 * densityScale },
+      alpha: { start: 0.72, end: 0 },
+      tint: [0xffebc2, 0xefc688, 0xcd7d35],
+      speedX: { min: 420, max: 920 },
+      speedY: { min: -260, max: 260 },
+      rotate: { min: -30, max: 30 }
+    }).setDepth(99);
+
+    this.desertStormEmitters = [ashLayer, grainLayer, chunkLayer, streakLayer];
+  }
+
+  private updateDesertStormScenario(time: number, deltaMs: number) {
+    if (this.mapId !== 'desert' || this.testRoomEnabled || this.tutorialMode) return;
+    const dt = Math.max(0, Math.min(80, deltaMs)) / 1000;
+    if (dt <= 0) return;
+
+    const section = this.getDesertSectionAtX(this.desertStormFrontX + 600);
+    const paceMul = section ? Phaser.Math.Linear(0.92, 1.15, section.drumDensity) : 1;
+    const speed = this.desertStormSpeedPxPerSec * paceMul;
+    this.desertStormFrontX += speed * dt;
+    if (time >= this.desertStormVisualLastUpdateT + this.desertStormVisualStrideMs) {
+      this.desertStormVisualLastUpdateT = time;
+      this.updateDesertStormVisual(time);
+    }
+
+    if (time > this.desertStormLastSweepT + 120) {
+      this.desertStormLastSweepT = time;
+      this.sweepDesertStormEntities(time);
+    }
+
+    if (this.player?.chassis?.active && !this.isDefeat) {
+      if (this.player.chassis.x <= this.desertStormFrontX + 180) {
+        this.player.takeDamage(this.player.maxHp * 10, ShellType.STANDARD);
+      } else if (!this.desertEscapeTriggered && this.player.chassis.x >= this.WORLD_WIDTH - 680) {
+        this.triggerDesertEscapeComplete();
+      }
+    }
+  }
+
+  private updateDesertStormVisual(time: number) {
+    if (!this.desertStormVisual?.active) return;
+    const cam = this.cameras.main;
+    const view = cam.worldView;
+    const threatDist = (this.player?.chassis?.x ?? this.desertStormFrontX + 2200) - this.desertStormFrontX;
+    const threatT = Phaser.Math.Clamp(1 - (threatDist - 450) / 2800, 0, 1);
+    const phase = time * 0.0032;
+
+    this.desertStormVisual.x = this.desertStormFrontX;
+    this.desertStormVisual.y = view.centerY + Math.sin(phase * 0.55) * 14;
+
+    const shadow = this.desertStormVisual.getData('shadow') as Phaser.GameObjects.Shape | undefined;
+    const coreA = this.desertStormVisual.getData('coreA') as Phaser.GameObjects.Shape | undefined;
+    const coreB = this.desertStormVisual.getData('coreB') as Phaser.GameObjects.Shape | undefined;
+    const dustA = this.desertStormVisual.getData('dustA') as Phaser.GameObjects.Shape | undefined;
+    const dustB = this.desertStormVisual.getData('dustB') as Phaser.GameObjects.Shape | undefined;
+    const edge = this.desertStormVisual.getData('edge') as Phaser.GameObjects.Shape | undefined;
+    const frontDense = this.desertStormVisual.getData('frontDense') as Phaser.GameObjects.Shape | undefined;
+    const swirlA = this.desertStormVisual.getData('swirlA') as Phaser.GameObjects.Shape | undefined;
+    const swirlB = this.desertStormVisual.getData('swirlB') as Phaser.GameObjects.Shape | undefined;
+    const clumps = this.desertStormVisual.getData('clumps') as Phaser.GameObjects.Shape[] | undefined;
+
+    if (shadow) shadow.setAlpha(Phaser.Math.Linear(0.44, 0.68, threatT) + Math.sin(phase * 0.9) * 0.04);
+    if (coreA) {
+      coreA.setAlpha(Phaser.Math.Linear(0.42, 0.72, threatT) + Math.sin(phase * 1.05) * 0.06);
+      coreA.x = -360 + Math.sin(phase * 0.92 + 0.4) * 30;
+    }
+    if (coreB) {
+      coreB.setAlpha(Phaser.Math.Linear(0.38, 0.66, threatT) + Math.sin(phase * 0.95 + 0.6) * 0.05);
+      coreB.x = -60 + Math.sin(phase * 0.86 + 1.1) * 24;
+    }
+    if (dustA) {
+      dustA.setAlpha(Phaser.Math.Linear(0.34, 0.62, threatT) + Math.sin(phase * 1.05 + 1.2) * 0.05);
+      dustA.x = 200 + Math.sin(phase * 0.8) * 28;
+    }
+    if (dustB) {
+      dustB.setAlpha(Phaser.Math.Linear(0.3, 0.56, threatT) + Math.sin(phase * 1.15 + 2.1) * 0.05);
+      dustB.x = 360 + Math.sin(phase * 0.9 + 0.5) * 24;
+    }
+    if (edge) {
+      edge.setAlpha(Phaser.Math.Linear(0.4, 0.8, threatT) + Math.sin(phase * 1.45 + 0.7) * 0.08);
+      edge.x = 450 + Math.sin(phase * 1.2) * 20;
+    }
+    if (frontDense) frontDense.setAlpha(Phaser.Math.Linear(0.5, 0.92, threatT) + Math.sin(phase * 1.9 + 0.9) * 0.08);
+    if (swirlA) {
+      swirlA.setAlpha(Phaser.Math.Linear(0.22, 0.42, threatT) + Math.sin(phase * 1.3) * 0.04);
+      swirlA.angle = -14 + Math.sin(phase * 1.2) * 8;
+    }
+    if (swirlB) {
+      swirlB.setAlpha(Phaser.Math.Linear(0.2, 0.4, threatT) + Math.sin(phase * 1.42 + 0.7) * 0.04);
+      swirlB.angle = 12 + Math.sin(phase * 1.3 + 1.1) * 8;
+    }
+    if (Array.isArray(clumps)) {
+      for (let i = 0; i < clumps.length; i++) {
+        const c = clumps[i];
+        if (!c?.active) continue;
+        const baseX = Number(c.getData('baseX') ?? c.x);
+        const ampX = Number(c.getData('ampX') ?? 12);
+        const phaseOffset = Number(c.getData('phase') ?? 0);
+        c.alpha = Phaser.Math.Linear(0.18, 0.42, threatT) + Math.sin(phase * (1.2 + i * 0.08) + phaseOffset) * 0.05;
+        c.x = baseX + Math.sin(phase * (0.92 + i * 0.07) + phaseOffset) * ampX;
+      }
+    }
+
+    if (this.desertStormEmitters.length > 0) {
+      const yMid = view.centerY;
+      const jitter = Math.sin(phase * 2.2) * 26;
+      const nearGain = Phaser.Math.Linear(1.1, 2.2, threatT);
+      const e0 = this.desertStormEmitters[0];
+      const e1 = this.desertStormEmitters[1];
+      const e2 = this.desertStormEmitters[2];
+      const e3 = this.desertStormEmitters[3];
+      if (e0?.active) {
+        e0.setPosition(this.desertStormFrontX - 270, yMid + jitter);
+        e0.setScale(Phaser.Math.Linear(1.0, 1.75, threatT));
+        e0.setAlpha(Phaser.Math.Linear(0.82, 1, threatT));
+      }
+      if (e1?.active) {
+        e1.setPosition(this.desertStormFrontX - 40, yMid - jitter * 0.4);
+        e1.setScale(nearGain * 1.06);
+        e1.setAlpha(Phaser.Math.Linear(0.9, 1, threatT));
+      }
+      if (e2?.active) {
+        e2.setPosition(this.desertStormFrontX + 140, yMid + jitter * 0.5);
+        e2.setScale(nearGain * 1.24);
+        e2.setAlpha(Phaser.Math.Linear(0.86, 1, threatT));
+      }
+      if (e3?.active) {
+        e3.setPosition(this.desertStormFrontX + 180, yMid - jitter * 0.2);
+        e3.setScale(Phaser.Math.Linear(1.0, 1.95, threatT));
+        e3.setAlpha(Phaser.Math.Linear(0.72, 1, threatT));
+      }
+    }
+  }
+
+  private sweepDesertStormEntities(time: number) {
+    const cutX = this.desertStormFrontX + this.desertStormSweepMargin;
+
+    for (let i = this.animals.length - 1; i >= 0; i--) {
+      const a = this.animals[i];
+      if (!a?.active) {
+        this.animals.splice(i, 1);
+        continue;
+      }
+      if (a.x <= cutX) a.takeDamage(999999, 'shell');
+    }
+
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e?.active) continue;
+      const ex = e instanceof Tank ? e.chassis.x : ((e as any).x as number);
+      if (!Number.isFinite(ex) || ex > cutX) continue;
+      if (e instanceof Tank) {
+        if (!e.isDead) e.takeDamage(e.maxHp * 12, ShellType.STANDARD);
+      } else if (e instanceof LandSubmarine) {
+        e.takeDamage(999999, ShellType.STANDARD);
+      }
+    }
+
+    this.enemyInfantry.applyDamage(cutX - 30, this.getTerrainHeight(cutX), 260, 999999, ShellType.HE);
+    this.allies.applyDamage(cutX - 30, this.getTerrainHeight(cutX), 260, 999999, ShellType.HE);
+
+    const vegChildren = this.vegetationGroup.getChildren();
+    for (let i = 0; i < vegChildren.length; i++) {
+      const v: any = vegChildren[i];
+      if (!v?.active) continue;
+      if ((v.x as number) <= cutX) v.destroy();
+    }
+
+    const treeChildren = this.treeGroup.getChildren();
+    for (let i = 0; i < treeChildren.length; i++) {
+      const t: any = treeChildren[i];
+      if (!t?.active) continue;
+      if ((t.x as number) <= cutX) t.destroy();
+    }
+
+    this.buildings.applySandstormFront(cutX - 40, cutX + 60, time, 0.5);
+  }
+
+  private triggerDesertEscapeComplete() {
+    if (this.desertEscapeTriggered) return;
+    this.desertEscapeTriggered = true;
+    this.cameras.main.fade(850, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.softResetAudioForSceneTransition();
+      this.scene.start('MenuScene');
+    });
+  }
+
   private perfNowMs(): number {
     if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
     return this.time.now;
@@ -7080,6 +7745,19 @@ export class MainScene extends Phaser.Scene {
       Math.round(Phaser.Math.Linear(this.enemyFarAiStride, strideTarget, 0.35)),
       1,
       6
+    );
+
+    const android = this.sys.game.device.os.android;
+    const mobile = android || this.sys.game.device.os.iOS || this.sys.game.device.input.touch;
+    const baseStormStride = android ? 55 : (mobile ? 45 : 34);
+    let stormExtra = 0;
+    if (fps < 42) stormExtra = mobile ? 72 : 46;
+    else if (fps < 48) stormExtra = mobile ? 54 : 34;
+    else if (fps < 54) stormExtra = mobile ? 36 : 22;
+    else if (fps < 58) stormExtra = mobile ? 18 : 12;
+    const stormTarget = baseStormStride + stormExtra;
+    this.desertStormVisualStrideMs = Math.round(
+      Phaser.Math.Linear(this.desertStormVisualStrideMs, stormTarget, 0.4)
     );
   }
 
@@ -7481,24 +8159,11 @@ export class MainScene extends Phaser.Scene {
     
     this.windT += delta;
     this.wind = Math.sin(this.windT * 0.00035) * 140 + Math.sin(this.windT * 0.0011) * 60;
-    if (this.mapId === 'desert' && time < this.sandstormUntilT) {
-      const mag = Math.max(240, Math.abs(this.wind));
-      this.wind = this.sandstormDir * mag;
-    }
     if (this.mapId === 'desert') {
-      if (time > this.lastDesertGustT + 1700) {
-        this.lastDesertGustT = time;
-        if (Math.random() < 0.38) this.particles.createDesertBlowingSand(Phaser.Math.Between(3800, 7600));
-        if (time > this.sandstormUntilT && Math.random() < 0.05) {
-          const dir: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
-          this.sandstormDir = dir;
-          const dur = 20000;
-          this.sandstormUntilT = time + dur;
-          const mag = Math.max(240, Math.abs(this.wind));
-          this.wind = dir * mag;
-          this.particles.createSandstorm();
-        }
-      }
+      const mag = Math.max(240, Math.abs(this.wind));
+      this.sandstormDir = 1;
+      this.wind = mag;
+      this.updateDesertStormScenario(time, clampedDelta);
     } else {
       if (this.allowForestRainThisRun && time > this.lastForestRainT + 2400) {
         this.lastForestRainT = time;
