@@ -176,6 +176,7 @@ export class MainScene extends Phaser.Scene {
   private lastFaunaUpdateT = 0;
   private lastVegetationInteractionT = 0;
   private lastWaterPlantUpdateT = 0;
+  private vegetationNearTankCache: { x: number; y: number; isPlayer: boolean }[] = [];
   private faunaUpdateIntervalMs = 33;
   private vegetationInteractionIntervalMs = 30;
   private waterPlantUpdateIntervalMs = 45;
@@ -7364,7 +7365,8 @@ export class MainScene extends Phaser.Scene {
       const interactionLerp = Phaser.Math.Clamp(0.16 + (vegetationElapsedMs / 1000) * 0.4, 0.14, 0.28);
       const relaxLerp = Phaser.Math.Clamp(0.08 + (vegetationElapsedMs / 1000) * 0.3, 0.08, 0.2);
 
-      const nearTankXs: { x: number; y: number; isPlayer: boolean }[] = [];
+      const nearTankXs = this.vegetationNearTankCache;
+      nearTankXs.length = 0;
       if (this.player?.active && this.player.chassis?.active) {
         nearTankXs.push({ x: this.player.chassis.x, y: this.player.chassis.y, isPlayer: true });
       }
@@ -7590,16 +7592,15 @@ export class MainScene extends Phaser.Scene {
       
       // If collapsed, use simple physics or just static lying down
       if ((f as any).collapsed) {
-         const groundY = this.getTerrainHeight(f.anchorX);
-         // Lay flat on ground
+         const settleWaveT = time * 0.0015 + f.phase * 0.7;
          for (let i = 0; i < segCount; i++) {
              const img = f.segments[i];
              const px = f.anchorX + i * f.segW;
-             const py = f.anchorY + Math.random() * 2; // Slight noise
+             const py = f.anchorY + Math.sin(settleWaveT + i * 0.9) * 0.7;
              f.points[i].set(px, py);
              if (!img.visible) img.setVisible(true);
              img.setPosition(px, py);
-             img.setRotation(0);
+             img.setRotation(Math.sin(settleWaveT * 0.8 + i * 0.45) * 0.035);
          }
          continue;
       }

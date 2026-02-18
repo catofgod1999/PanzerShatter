@@ -42,7 +42,7 @@ export class UIScene extends Phaser.Scene {
   private bossBarInnerWidth: number = 1;
   private bossBarLastRatio: number | null = null;
 
-  private buttons: Array<{ id: string; bg: any; label: Phaser.GameObjects.Text }> = [];
+  private buttons: Array<{ id: string; bg: any; label: Phaser.GameObjects.Text; deco?: Phaser.GameObjects.GameObject }> = [];
   private aimArea?: Phaser.GameObjects.Rectangle;
   private aimStickBg?: Phaser.GameObjects.Arc;
   private aimStickTriangle?: Phaser.GameObjects.Triangle;
@@ -95,6 +95,8 @@ export class UIScene extends Phaser.Scene {
   private weaponWheelOrigin = new Phaser.Math.Vector2();
   private weaponWheelSelection: ShellType | null = null;
   private currentShellBtnText?: Phaser.GameObjects.Text;
+  private touchAimWorldSmoothed = new Phaser.Math.Vector2();
+  private touchAimWorldSeeded = false;
   private readonly weaponWheelInnerRadius = 48;
   private readonly weaponWheelOuterRadius = 122;
   private readonly weaponWheelOptions: WeaponWheelOption[] = [
@@ -280,23 +282,26 @@ export class UIScene extends Phaser.Scene {
     }
 
     if (preset === 'tankstar' && this.tankstarMovePointerId !== null) {
-      const p = this.input.manager.pointers.find(ptr => ptr.id === this.tankstarMovePointerId);
+      const p = this.getPointerById(this.tankstarMovePointerId);
       if (p && p.active) this.updateTankstarMoveFromPointer(p);
     }
 
-    if (preset === 'new') {
+    if (preset === 'new' || preset === 'tankstar') {
       const cam = main.cameras?.main as Phaser.Cameras.Scene2D.Camera | undefined;
       const player = main.player;
       if (!cam || !player?.chassis?.active || !main.aimWorld?.set) return;
 
       if (Math.abs(main.aimWorld.x) < 0.1 && Math.abs(main.aimWorld.y) < 0.1) {
         const fx = player.chassis.flipX ? -1 : 1;
-        main.aimWorld.set(player.chassis.x + fx * 800, player.chassis.y - 30);
+        const x = player.chassis.x + fx * 800;
+        const y = player.chassis.y - 30;
+        main.aimWorld.set(x, y);
+        this.seedTouchAimWorld(main);
       }
 
       const pid = this.aimPointerId;
       if (pid !== null) {
-        const p = this.input.manager.pointers.find(ptr => ptr.id === pid);
+        const p = this.getPointerById(pid);
         if (!p || !p.active) {
           this.releasePointerEverywhere(pid);
           return;
@@ -313,62 +318,21 @@ export class UIScene extends Phaser.Scene {
           const rangeMul = Phaser.Math.Linear(0.46, 1.6, senseT);
           const fineAimMul = this.aimFirePointerId !== null ? 0.76 : 1;
 
-          const maxScreenDist = Math.min(this.aimClampRect.width, this.aimClampRect.height) * 0.62;
-          const dist = (maxScreenDist / Math.max(0.001, cam.zoom)) * responseMag * rangeMul * fineAimMul;
-
-          const px = player.chassis.x;
-          const py = player.chassis.y - 30;
-          main.aimWorld.set(px + nx * dist, py + ny * dist);
-        }
-      }
-      if (this.crosshair?.active) {
-        const show = pid !== null || this.aimFirePointerId !== null;
-        if (show) {
-          const sx = cam.x + (main.aimWorld.x - cam.worldView.x) * cam.zoom;
-          const sy = cam.y + (main.aimWorld.y - cam.worldView.y) * cam.zoom;
-          this.crosshair.setPosition(sx, sy).setScale(0.82).setAlpha(0.82).setVisible(true);
-        } else if (this.crosshair.visible) {
-          this.crosshair.setVisible(false);
-        }
-      }
-      return;
-    }
-
-    if (preset === 'tankstar') {
-      const cam = main.cameras?.main as Phaser.Cameras.Scene2D.Camera | undefined;
-      const player = main.player;
-      if (!cam || !player?.chassis?.active || !main.aimWorld?.set) return;
-
-      if (Math.abs(main.aimWorld.x) < 0.1 && Math.abs(main.aimWorld.y) < 0.1) {
-        const fx = player.chassis.flipX ? -1 : 1;
-        main.aimWorld.set(player.chassis.x + fx * 800, player.chassis.y - 30);
-      }
-
-      const pid = this.aimPointerId;
-      if (pid !== null) {
-        const p = this.input.manager.pointers.find(ptr => ptr.id === pid);
-        if (!p || !p.active) {
-          this.releasePointerEverywhere(pid);
-          return;
-        }
-
-        const mag = Math.min(1, Math.sqrt(this.aimStickVec.x * this.aimStickVec.x + this.aimStickVec.y * this.aimStickVec.y));
-        if (mag >= 0.001) {
-          const nx = this.aimStickVec.x / mag;
-          const ny = this.aimStickVec.y / mag;
-          const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.35, 2.5);
-          const senseT = Phaser.Math.Clamp((aimSense - 0.35) / 2.15, 0, 1);
-          const responseExp = Phaser.Math.Linear(1.8, 0.52, senseT);
-          const responseMag = Phaser.Math.Clamp(Math.pow(mag, responseExp), 0, 1);
-          const rangeMul = Phaser.Math.Linear(0.46, 1.6, senseT);
-          const fineAimMul = this.aimFirePointerId !== null ? 0.76 : 1;
-
-          const maxWorldDist = (this.aimClampRect.width * 1.15) / Math.max(0.001, cam.zoom);
+          const maxWorldDist = preset === 'new'
+            ? (Math.min(this.aimClampRect.width, this.aimClampRect.height) * 0.62) / Math.max(0.001, cam.zoom)
+            : (this.aimClampRect.width * 1.15) / Math.max(0.001, cam.zoom);
           const dist = maxWorldDist * responseMag * rangeMul * fineAimMul;
 
           const px = player.chassis.x;
           const py = player.chassis.y - 30;
-          main.aimWorld.set(px + nx * dist, py + ny * dist);
+          const targetX = px + nx * dist;
+          const targetY = py + ny * dist;
+          const blend = Phaser.Math.Clamp(
+            (this.aimFirePointerId !== null ? 0.22 : 0.28) + responseMag * 0.36,
+            0.2,
+            0.72
+          );
+          this.applyTouchAimWorld(main, targetX, targetY, blend);
         }
       }
       if (this.crosshair?.active) {
@@ -385,7 +349,7 @@ export class UIScene extends Phaser.Scene {
     }
 
     if (this.aimPointerId !== null) {
-      const p = this.input.manager.pointers.find(ptr => ptr.id === this.aimPointerId);
+      const p = this.getPointerById(this.aimPointerId);
       if (p && p.active) {
         const aimSense = Phaser.Math.Clamp(this.aimSensitivity, 0.35, 2.5);
         const w = Math.max(1, this.scale.width);
@@ -466,6 +430,45 @@ export class UIScene extends Phaser.Scene {
     return 1;
   }
 
+  private getPointerById(pointerId: number | null): Phaser.Input.Pointer | null {
+    if (pointerId === null) return null;
+    const pointers = this.input.manager.pointers;
+    for (let i = 0; i < pointers.length; i++) {
+      const pointer = pointers[i];
+      if (pointer.id === pointerId) return pointer;
+    }
+    return null;
+  }
+
+  private seedTouchAimWorld(main: any) {
+    const aim = main?.aimWorld;
+    if (!aim) {
+      this.touchAimWorldSeeded = false;
+      return;
+    }
+    this.touchAimWorldSmoothed.set(aim.x, aim.y);
+    this.touchAimWorldSeeded = true;
+  }
+
+  private resetTouchAimWorldSmoothing() {
+    this.touchAimWorldSeeded = false;
+  }
+
+  private applyTouchAimWorld(main: any, targetX: number, targetY: number, blend: number) {
+    if (!main?.aimWorld?.set) return;
+    const k = Phaser.Math.Clamp(blend, 0.05, 1);
+    if (!this.touchAimWorldSeeded) {
+      this.touchAimWorldSmoothed.set(targetX, targetY);
+      this.touchAimWorldSeeded = true;
+    } else {
+      this.touchAimWorldSmoothed.set(
+        Phaser.Math.Linear(this.touchAimWorldSmoothed.x, targetX, k),
+        Phaser.Math.Linear(this.touchAimWorldSmoothed.y, targetY, k)
+      );
+    }
+    main.aimWorld.set(this.touchAimWorldSmoothed.x, this.touchAimWorldSmoothed.y);
+  }
+
   private getGameViewportRect(w: number, h: number, out?: Phaser.Geom.Rectangle): Phaser.Geom.Rectangle {
     // Use full viewport to avoid any black side bars/letterboxing.
     if (out) {
@@ -479,6 +482,7 @@ export class UIScene extends Phaser.Scene {
     for (const b of this.buttons) {
       b.bg.destroy();
       b.label.destroy();
+      if (b.deco?.active) b.deco.destroy();
     }
     this.buttons = [];
     if (this.aimArea?.active) this.aimArea.destroy();
@@ -489,6 +493,7 @@ export class UIScene extends Phaser.Scene {
     this.aimStickTriangle = undefined;
     this.aimStickVec.set(0, 0);
     this.aimPointerId = null;
+    this.resetTouchAimWorldSmoothing();
     if (this.aimFireTimer) this.aimFireTimer.destroy();
     this.aimFireTimer = undefined;
     this.aimFirePointerId = null;
@@ -667,20 +672,22 @@ export class UIScene extends Phaser.Scene {
       x = p0.x;
       y = p0.y;
       const radius = size * 0.5;
-      const bg = this.add.circle(x, y, radius, color, 0.45).setStrokeStyle(3, strokeColor, 0.5).setDepth(1010);
+      const bg = this.add.circle(x, y, radius, color, 0.52).setStrokeStyle(3, strokeColor, 0.56).setDepth(1010);
+      const deco = this.add.circle(x, y - radius * 0.2, radius * 0.56, 0xffffff, 0.09).setDepth(1010);
       const isAndroid = !!this.sys.game.device.os.android;
       const fontSize = Math.max(12, Math.round(size * (isAndroid ? 0.32 : 0.28)));
       const t = this.add.text(x, y, label, {
-        fontFamily: 'monospace',
+        fontFamily: 'Arial Black',
         fontSize: `${fontSize}px`,
         color: '#ffffff',
         stroke: '#000000',
-        strokeThickness: Math.max(2, Math.round(fontSize * 0.18)),
+        strokeThickness: Math.max(2, Math.round(fontSize * 0.2)),
         fontStyle: '700'
       }).setOrigin(0.5).setDepth(1011);
-      if (isAndroid && typeof window !== 'undefined') {
+      t.setShadow(0, 1, '#000000', 2, true, true);
+      if (typeof window !== 'undefined') {
         const dpr = window.devicePixelRatio || 1;
-        t.setResolution(Phaser.Math.Clamp(dpr, 1.25, 3));
+        t.setResolution(Phaser.Math.Clamp(dpr, isAndroid ? 1.25 : 1, 3));
       }
       
       bg.setInteractive(new Phaser.Geom.Circle(radius, radius, radius), Phaser.Geom.Circle.Contains);
@@ -689,18 +696,21 @@ export class UIScene extends Phaser.Scene {
         this.input.setDraggable(bg);
         bg.on('drag', (_p: any, dragX: number, dragY: number) => {
           bg.setPosition(dragX, dragY);
+          deco.setPosition(dragX, dragY - radius * 0.2);
           t.setPosition(dragX, dragY);
         });
         bg.on('dragend', () => this.saveCustomLayoutEntry(preset, id, bg.x, bg.y));
       } else {
         const press = (pid: number) => {
-          bg.setFillStyle(0xffffff, 0.3);
-          bg.setStrokeStyle(3, 0xffffff, 0.8);
+          bg.setFillStyle(0xffffff, 0.34);
+          bg.setStrokeStyle(3, 0xffffff, 0.85);
+          if (deco.active) deco.setFillStyle(0xffffff, 0.17);
           onDown(pid);
         };
         const release = (pid: number) => {
-          bg.setFillStyle(color, 0.45);
-          bg.setStrokeStyle(3, strokeColor, 0.5);
+          bg.setFillStyle(color, 0.52);
+          bg.setStrokeStyle(3, strokeColor, 0.56);
+          if (deco.active) deco.setFillStyle(0xffffff, 0.09);
           onUp(pid);
         };
 
@@ -709,7 +719,7 @@ export class UIScene extends Phaser.Scene {
         if (releaseOnOut) bg.on('pointerout', (p: Phaser.Input.Pointer) => release(p.id));
       }
 
-      this.buttons.push({ id, bg: bg as any, label: t });
+      this.buttons.push({ id, bg: bg as any, label: t, deco });
       return { bg, t };
     };
 
@@ -1235,13 +1245,12 @@ export class UIScene extends Phaser.Scene {
   }
 
   private isPointOverButton(x: number, y: number): boolean {
-    // Check if point is inside any button's hit area
-    // Buttons are circles
     for (const btn of this.buttons) {
       const bg = btn.bg;
-      if (bg.getBounds().contains(x, y)) {
-         return true;
-      }
+      const dx = x - bg.x;
+      const dy = y - bg.y;
+      const r = (bg.radius as number | undefined) ?? ((bg.displayWidth as number | undefined) ? bg.displayWidth * 0.5 : 0);
+      if (r > 0 && (dx * dx + dy * dy) <= r * r) return true;
     }
     return false;
   }
@@ -1265,6 +1274,7 @@ export class UIScene extends Phaser.Scene {
 
     this.aimStartScreen.set(p.x, p.y);
     this.aimStartWorld.set(ax, ay);
+    this.seedTouchAimWorld(main);
 
     if (this.aimFireTimer) this.aimFireTimer.destroy();
     this.aimFirePointerId = null;
@@ -1296,6 +1306,7 @@ export class UIScene extends Phaser.Scene {
     if (this.aimFirePointerId === p.id) this.aimFirePointerId = null;
     if (this.aimFireTimer) this.aimFireTimer.destroy();
     this.aimFireTimer = undefined;
+    this.resetTouchAimWorldSmoothing();
   }
 
   private onStickDown(p: Phaser.Input.Pointer) {
@@ -1303,6 +1314,7 @@ export class UIScene extends Phaser.Scene {
     if (this.aimPointerId !== null) return;
     this.aimPointerId = p.id;
     this.updateStickFromPointer(p);
+    this.seedTouchAimWorld(this.scene.get('MainScene') as any);
 
     if (this.aimFireTimer) this.aimFireTimer.destroy();
     this.aimFireTimer = undefined;
@@ -1332,6 +1344,7 @@ export class UIScene extends Phaser.Scene {
     if (pointerId !== undefined && this.aimFirePointerId === pointerId) this.aimFirePointerId = null;
     if (this.aimFireTimer) this.aimFireTimer.destroy();
     this.aimFireTimer = undefined;
+    this.resetTouchAimWorldSmoothing();
   }
 
   private updateStickFromPointer(p: Phaser.Input.Pointer) {
@@ -1362,6 +1375,7 @@ export class UIScene extends Phaser.Scene {
       const shakeY = Number((cam as any)?.shakeEffect?._offsetY ?? 0);
       const wp = cam.getWorldPoint(p.x - cam.x - shakeX, p.y - cam.y - shakeY);
       main.aimWorld.set(wp.x, wp.y);
+      this.seedTouchAimWorld(main);
     }
     if (this.aimPointerId !== null) return;
     this.aimPointerId = p.id;
@@ -1407,6 +1421,7 @@ export class UIScene extends Phaser.Scene {
     if (this.tankstarAimOrigin?.active) this.tankstarAimOrigin.setVisible(false);
     if (this.tankstarAimPowerFill?.active) this.tankstarAimPowerFill.setVisible(false);
     if (this.tankstarAimGfx?.active) this.tankstarAimGfx.clear();
+    this.resetTouchAimWorldSmoothing();
   }
 
   private updateTankstarAimFromPointer(p: Phaser.Input.Pointer) {
@@ -1539,33 +1554,36 @@ export class UIScene extends Phaser.Scene {
     color: number,
     alpha: number
   ) {
-    const norm360 = (deg: number) => {
+    const normalize360 = (deg: number) => {
       let d = deg % 360;
       if (d < 0) d += 360;
       return d;
     };
-    let s = norm360(startDeg);
-    let e = norm360(endDeg);
+    let s = normalize360(startDeg);
+    let e = normalize360(endDeg);
     if (e <= s) e += 360;
     const span = e - s;
-    const steps = Math.max(5, Math.ceil(span / 10));
+    const steps = Math.max(6, Math.ceil(span / 8));
 
-    const pts: Phaser.Math.Vector2[] = [];
+    gfx.fillStyle(color, alpha);
+    gfx.lineStyle(2, 0xffffff, 0.45);
+    gfx.beginPath();
     for (let i = 0; i <= steps; i++) {
       const deg = s + (span * i) / steps;
       const rad = Phaser.Math.DegToRad(deg);
-      pts.push(new Phaser.Math.Vector2(Math.cos(rad) * rOuter, Math.sin(rad) * rOuter));
+      const x = Math.cos(rad) * rOuter;
+      const y = Math.sin(rad) * rOuter;
+      if (i === 0) gfx.moveTo(x, y);
+      else gfx.lineTo(x, y);
     }
     for (let i = steps; i >= 0; i--) {
       const deg = s + (span * i) / steps;
       const rad = Phaser.Math.DegToRad(deg);
-      pts.push(new Phaser.Math.Vector2(Math.cos(rad) * rInner, Math.sin(rad) * rInner));
+      gfx.lineTo(Math.cos(rad) * rInner, Math.sin(rad) * rInner);
     }
-
-    gfx.fillStyle(color, alpha);
-    gfx.lineStyle(2, 0xffffff, 0.45);
-    gfx.fillPoints(pts, true);
-    gfx.strokePoints(pts, true);
+    gfx.closePath();
+    gfx.fillPath();
+    gfx.strokePath();
   }
 
   private onWeaponBtnDown(p: Phaser.Input.Pointer, originX: number, originY: number) {
