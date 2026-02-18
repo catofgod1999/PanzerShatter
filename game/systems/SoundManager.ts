@@ -98,6 +98,8 @@ export class SoundManager {
   private readonly reverbYieldDurationMs = 1500;
   private readonly reverbPanRecenterDelayMs = 500;
   private readonly reverbPanRecenterDurationMs = 1000;
+  private readonly projectileExplosionAttenuationFloor = 0.12;
+  private readonly projectileExplosionFarLowpassHz = 2200;
   private backgroundPrewarmQueue: string[] = [];
   private backgroundPrewarmInFlight = 0;
   private backgroundPrewarmTimer: Phaser.Time.TimerEvent | null = null;
@@ -611,7 +613,10 @@ export class SoundManager {
 
     if (key.startsWith('vehicle/')) {
       if (this.folderHasSegment(key, 'fire')) return 0.95;
-      if (this.folderHasSegment(key, 'cookoff') || this.folderHasSegment(key, 'explosion')) return 0.92;
+      if (this.folderHasSegment(key, 'cookoff') || this.folderHasSegment(key, 'explosion')) {
+        if (key.startsWith('vehicle/enemy_')) return 0.52;
+        return 0.68;
+      }
       if (this.folderHasSegment(key, 'flight_loop')) return 0.88;
       if (this.folderHasSegment(key, 'idle_engine_loop')) return 0.74;
       if (this.folderHasSegment(key, 'cruise_loop')) return 0.78;
@@ -634,7 +639,10 @@ export class SoundManager {
 
     if (key.startsWith('vehicle/')) {
       if (this.folderHasSegment(key, 'fire')) return 0.9;
-      if (this.folderHasSegment(key, 'cookoff') || this.folderHasSegment(key, 'explosion')) return 0.86;
+      if (this.folderHasSegment(key, 'cookoff') || this.folderHasSegment(key, 'explosion')) {
+        if (key.startsWith('vehicle/enemy_')) return 0.34;
+        return 0.48;
+      }
       return 0.28;
     }
 
@@ -829,7 +837,10 @@ export class SoundManager {
       const duckVol = (sound as any).__panzerDuckVolume ?? 1.0;
       const bgmDuckVol = (sound as any).__panzerBgmDuckVolume ?? 1.0;
       const isVehicleFolder = typeof folderKey === 'string' && this.normalizeFolderKey(folderKey).replace(/^public\/sfx\//, '').startsWith('vehicle/');
-      const cookoffFocusDuck = isVehicleFolder ? 1.0 : this.currentCookoffFocusDuck;
+      const isBgmFolder = this.isBgmFolder(folderKey);
+      const cookoffFocusDuck = isVehicleFolder
+        ? 1.0
+        : (isBgmFolder ? Phaser.Math.Linear(1.0, this.currentCookoffFocusDuck, 0.25) : this.currentCookoffFocusDuck);
       const finalVol = baseVolume * a * duckVol * bgmDuckVol * cookoffFocusDuck;
       if (!this.safeSetVolume(sound, finalVol)) {
         this.pruneBrokenLoop(id, sound);
@@ -854,7 +865,7 @@ export class SoundManager {
         }
       }
 
-      if (cookoffFocusActive && !isVehicleFolder) {
+      if (cookoffFocusActive && !isVehicleFolder && !isBgmFolder) {
         let mixerLowpassHz = (sound as any).__panzerMixerLowpassHz as number | undefined;
         if (typeof mixerLowpassHz !== 'number' || !Number.isFinite(mixerLowpassHz)) {
           const mix = this.getMixerSettingsForFolder(folderKey);
@@ -895,12 +906,13 @@ export class SoundManager {
 
       const ignoreDistanceAttenuation =
         typeof folderKey === 'string' && this.shouldIgnoreDistanceAttenuation(folderKey);
+      const attenuationFloor = this.getDistanceAttenuationFloor(folderKey);
       const staticAtt = (snd as any).__panzerBaseAttenuation as number | undefined;
       const att = trackPosition
-        ? (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance))
+        ? (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance, attenuationFloor))
         : (typeof staticAtt === 'number' && Number.isFinite(staticAtt)
           ? staticAtt
-          : (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance)));
+          : (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance, attenuationFloor)));
       const reverbMul = isWeaponForestReverb ? this.applyWeaponForestReverbDynamics(snd, folderKey, now) : 1;
       const normalizedFolder = typeof folderKey === 'string'
         ? this.normalizeFolderKey(folderKey).replace(/^public\/sfx\//, '')
@@ -952,12 +964,13 @@ export class SoundManager {
 
       const ignoreDistanceAttenuation =
         typeof folderKey === 'string' && this.shouldIgnoreDistanceAttenuation(folderKey);
+      const attenuationFloor = this.getDistanceAttenuationFloor(folderKey);
       const staticAtt = (snd as any).__panzerBaseAttenuation as number | undefined;
       const att = trackPosition
-        ? (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance))
+        ? (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance, attenuationFloor))
         : (typeof staticAtt === 'number' && Number.isFinite(staticAtt)
           ? staticAtt
-          : (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance)));
+          : (ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, maxDistance, attenuationFloor)));
       const reverbMul = isWeaponForestReverb ? this.applyWeaponForestReverbDynamics(snd, folderKey, now) : 1;
       const normalizedFolder = typeof folderKey === 'string'
         ? this.normalizeFolderKey(folderKey).replace(/^public\/sfx\//, '')
@@ -1032,7 +1045,7 @@ export class SoundManager {
     }
 
     const stackedStrength = Phaser.Math.Clamp(
-      bgmSidechainStrength + Math.max(0, sidechainTriggerCount - 1) * 0.07,
+      bgmSidechainStrength + Math.max(0, sidechainTriggerCount - 1) * 0.04,
       0,
       1
     );
@@ -1045,7 +1058,7 @@ export class SoundManager {
     const bgmLowpassTarget = Phaser.Math.Linear(30000, 4600, bgmHighCutApplied);
 
     const ambientDuckSpeed = ambientDuckVol < this.currentAmbientDuckVolume ? 0.12 : 0.026;
-    const bgmDuckSpeed = bgmDuckVol < this.currentBgmDuckVolume ? 0.26 : 0.055;
+    const bgmDuckSpeed = bgmDuckVol < this.currentBgmDuckVolume ? 0.16 : 0.05;
     const bgmLowpassSpeed = bgmLowpassTarget < this.currentBgmLowpassHz ? 0.24 : 0.065;
 
     this.currentAmbientDuckVolume = Phaser.Math.Linear(this.currentAmbientDuckVolume, ambientDuckVol, ambientDuckSpeed);
@@ -1387,6 +1400,36 @@ export class SoundManager {
     return key.startsWith('vehicle/') && key.includes('/cookoff/');
   }
 
+  private isProjectileExplosionFolder(folderKey: string | undefined): boolean {
+    if (!folderKey) return false;
+    const key = this.normalizeFolderKey(folderKey).replace(/^public\/sfx\//, '');
+    if (!key.startsWith('weapon/')) return false;
+    return (
+      this.folderHasSegment(key, 'explosion') ||
+      this.folderHasSegment(key, 'ground_hit_forest') ||
+      this.folderHasSegment(key, 'hit_vehicle') ||
+      this.folderHasSegment(key, 'reverb_forest_after_explosion') ||
+      this.folderHasSegment(key, 'reverb_after_explosion')
+    );
+  }
+
+  private getDistanceAttenuationFloor(folderKey: string | undefined): number {
+    if (!this.isProjectileExplosionFolder(folderKey)) return 0;
+    return this.projectileExplosionAttenuationFloor;
+  }
+
+  private computeExplosionDistanceLowpassHz(
+    folderKey: string | undefined,
+    attenuation: number,
+    mixerLowpassHz: number
+  ): number | null {
+    if (!this.isProjectileExplosionFolder(folderKey)) return null;
+    const nearHz = mixerLowpassHz > 0 ? mixerLowpassHz : 30000;
+    const farHz = Math.min(nearHz, this.projectileExplosionFarLowpassHz);
+    const t = Phaser.Math.Clamp(1 - attenuation, 0, 1);
+    return Phaser.Math.Linear(nearHz, farHz, t);
+  }
+
   private getReverbYieldMultiplier(sound: Phaser.Sound.BaseSound, now: number): number {
     const yieldFrom = Number((sound as any).__panzerReverbYieldFromAt ?? 0);
     if (!Number.isFinite(yieldFrom) || yieldFrom <= 0) return 1;
@@ -1492,27 +1535,27 @@ export class SoundManager {
     }
   }
 
-  private computeAttenuation(worldX: number | undefined, worldY: number | undefined, maxDistance: number | undefined): number {
+  private computeAttenuation(
+    worldX: number | undefined,
+    worldY: number | undefined,
+    maxDistance: number | undefined,
+    attenuationFloor: number = 0
+  ): number {
     if (typeof worldX !== 'number' || !Number.isFinite(worldX)) return 1;
     this.syncListenerFromCamera();
     if (!Number.isFinite(this.listenerX) || !Number.isFinite(this.listenerY)) return 1;
     const md = typeof maxDistance === 'number' && Number.isFinite(maxDistance) && maxDistance > 0 ? maxDistance : 2200;
+    const floor = Phaser.Math.Clamp(attenuationFloor, 0, 0.95);
     const dx = worldX - this.listenerX;
     const dy = typeof worldY === 'number' && Number.isFinite(worldY) ? (worldY - this.listenerY) : 0;
     const d = Math.sqrt(dx * dx + dy * dy);
     if (!Number.isFinite(d)) return 1;
     if (d <= 0) return 1;
-    if (d >= md) return 0;
-    
-    // Original Quadratic: 1 - (d/md)^2 -> Falls off fast then slowly at end? No, 1-x^2 falls off slow then fast.
-    // Actually (1-k)^2 is better for standard "inverse square" approximation in linear space.
-    // Let's use a smoother curve: (1 - d/md)^1.5 or just Linear for now as user requested "smoother at distance".
-    // User complaint: "Too harsh at distance".
-    // Try Inverse Linear: 1 - (d/md) -> This is linear.
-    // Try Power: Math.pow(1 - d/md, 0.8) -> stays louder longer.
+    if (d >= md) return floor;
+
     const k = d / md;
-    // return Phaser.Math.Clamp(1 - k * k, 0, 1); // Old quadratic
-    return Phaser.Math.Clamp(Math.pow(1 - k, 0.75), 0, 1); // New power curve (stays louder at mid-range)
+    const shaped = Phaser.Math.Clamp(Math.pow(1 - k, 0.75), 0, 1);
+    return Phaser.Math.Clamp(floor + (1 - floor) * shaped, floor, 1);
   }
 
   private hashKeyForUrl(url: string): string {
@@ -1940,7 +1983,8 @@ export class SoundManager {
       const worldY = typeof opts?.worldY === 'number' && Number.isFinite(opts.worldY) ? opts.worldY : undefined;
       const pan = this.computePan(worldX, opts?.pan);
       const ignoreDistanceAttenuation = this.shouldIgnoreDistanceAttenuation(resolved.folder);
-      const att = ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, opts?.maxDistance);
+      const attenuationFloor = this.getDistanceAttenuationFloor(resolved.folder);
+      const att = ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, opts?.maxDistance, attenuationFloor);
       const snd = this.scene.sound.add(key, { loop: false, volume: Phaser.Math.Clamp(baseVol * att, 0, 2) }) as ManagedSound;
       if (typeof snd.setPan === 'function') snd.setPan(pan);
       const rate = typeof opts?.rate === 'number' && Number.isFinite(opts.rate) ? opts.rate : 1;
@@ -1953,6 +1997,10 @@ export class SoundManager {
       } catch {}
       if (mix.lowpassHz > 0) this.setLowpassFrequency(snd, mix.lowpassHz);
       if (mix.highpassHz > 0) this.setHighpassFrequency(snd, mix.highpassHz);
+      const distanceLowpassHz = this.computeExplosionDistanceLowpassHz(resolved.folder, att, mix.lowpassHz);
+      if (typeof distanceLowpassHz === 'number' && Number.isFinite(distanceLowpassHz)) {
+        this.setLowpassFrequency(snd, distanceLowpassHz);
+      }
       (snd as any).__panzerWorldX = worldX;
       (snd as any).__panzerWorldY = worldY;
       (snd as any).__panzerMaxDistance = opts?.maxDistance;
@@ -2024,7 +2072,8 @@ export class SoundManager {
       const worldY = typeof opts?.worldY === 'number' && Number.isFinite(opts.worldY) ? opts.worldY : undefined;
       const pan = this.computePan(worldX, opts?.pan);
       const ignoreDistanceAttenuation = this.shouldIgnoreDistanceAttenuation(resolved.folder);
-      const att = ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, opts?.maxDistance);
+      const attenuationFloor = this.getDistanceAttenuationFloor(resolved.folder);
+      const att = ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, opts?.maxDistance, attenuationFloor);
       const snd = this.scene.sound.add(key, { loop: false, volume: Phaser.Math.Clamp(baseVol * att, 0, 2) }) as ManagedSound;
       if (typeof snd.setPan === 'function') snd.setPan(pan);
       const rate = typeof opts?.rate === 'number' && Number.isFinite(opts.rate) ? opts.rate : 1;
@@ -2037,6 +2086,10 @@ export class SoundManager {
       } catch {}
       if (mix.lowpassHz > 0) this.setLowpassFrequency(snd, mix.lowpassHz);
       if (mix.highpassHz > 0) this.setHighpassFrequency(snd, mix.highpassHz);
+      const distanceLowpassHz = this.computeExplosionDistanceLowpassHz(resolved.folder, att, mix.lowpassHz);
+      if (typeof distanceLowpassHz === 'number' && Number.isFinite(distanceLowpassHz)) {
+        this.setLowpassFrequency(snd, distanceLowpassHz);
+      }
       (snd as any).__panzerWorldX = worldX;
       (snd as any).__panzerWorldY = worldY;
       (snd as any).__panzerMaxDistance = opts?.maxDistance;
@@ -2153,7 +2206,8 @@ export class SoundManager {
       const worldY = typeof opts?.worldY === 'number' && Number.isFinite(opts.worldY) ? opts.worldY : undefined;
       const pan = this.computePan(worldX, opts?.pan);
       const ignoreDistanceAttenuation = this.shouldIgnoreDistanceAttenuation(resolved.folder);
-      const att = ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, opts?.maxDistance);
+      const attenuationFloor = this.getDistanceAttenuationFloor(resolved.folder);
+      const att = ignoreDistanceAttenuation ? 1 : this.computeAttenuation(worldX, worldY, opts?.maxDistance, attenuationFloor);
       const snd = this.scene.sound.add(key, { loop: false, volume: Phaser.Math.Clamp(baseVol * att, 0, 2) }) as ManagedSound;
       if (typeof snd.setPan === 'function') snd.setPan(pan);
       const rate = typeof opts?.rate === 'number' && Number.isFinite(opts.rate) ? opts.rate : 1;
@@ -2166,6 +2220,10 @@ export class SoundManager {
       } catch {}
       if (mix.lowpassHz > 0) this.setLowpassFrequency(snd, mix.lowpassHz);
       if (mix.highpassHz > 0) this.setHighpassFrequency(snd, mix.highpassHz);
+      const distanceLowpassHz = this.computeExplosionDistanceLowpassHz(resolved.folder, att, mix.lowpassHz);
+      if (typeof distanceLowpassHz === 'number' && Number.isFinite(distanceLowpassHz)) {
+        this.setLowpassFrequency(snd, distanceLowpassHz);
+      }
       (snd as any).__panzerWorldX = worldX;
       (snd as any).__panzerWorldY = worldY;
       (snd as any).__panzerMaxDistance = opts?.maxDistance;

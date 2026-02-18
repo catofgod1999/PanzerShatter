@@ -233,6 +233,7 @@ export class Tank {
   private keys: any = null;
   private mineKey?: Phaser.Input.Keyboard.Key;
   private mineKeyNumpad?: Phaser.Input.Keyboard.Key;
+  private keyboardListeners: { event: string; fn: (...args: any[]) => void }[] = [];
   private idleTimer: number = 0;
   private isMortarAiming: boolean = false;
   private isNukeAiming: boolean = false;
@@ -598,13 +599,22 @@ export class Tank {
       this.keys = scene.input.keyboard.addKeys('A,D,LEFT,RIGHT,SHIFT,SPACE,C,Q,Z,ONE,TWO,THREE,FOUR,FIVE,X');
       this.mineKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
       this.mineKeyNumpad = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_FIVE);
-      scene.input.keyboard.on('keydown-ONE', () => this.setShell(ShellType.STANDARD));
-      scene.input.keyboard.on('keydown-TWO', () => this.setShell(ShellType.HE));
-      scene.input.keyboard.on('keydown-THREE', () => this.setShell(ShellType.AP));
-      scene.input.keyboard.on('keydown-FOUR', () => this.setShell(ShellType.INCENDIARY));
-      scene.input.keyboard.on('keydown-FIVE', () => { if (this.isPlayer && !this.isDead) this.tryPlaceMine(); });
-      scene.input.keyboard.on('keydown-X', () => { if(this.isPlayer && !this.isDead) this.isNukeAiming = true; });
-      scene.input.keyboard.on('keyup-X', () => { if(this.isPlayer && !this.isDead && this.isNukeAiming) { this.isNukeAiming = false; this.tryNuke(); } });
+      const bindKey = (event: string, fn: () => void) => {
+        scene.input.keyboard.on(event, fn);
+        this.keyboardListeners.push({ event, fn });
+      };
+      bindKey('keydown-ONE', () => this.setShell(ShellType.STANDARD));
+      bindKey('keydown-TWO', () => this.setShell(ShellType.HE));
+      bindKey('keydown-THREE', () => this.setShell(ShellType.AP));
+      bindKey('keydown-FOUR', () => this.setShell(ShellType.INCENDIARY));
+      bindKey('keydown-FIVE', () => { if (this.isPlayer && !this.isDead) this.tryPlaceMine(); });
+      bindKey('keydown-X', () => { if (this.isPlayer && !this.isDead) this.isNukeAiming = true; });
+      bindKey('keyup-X', () => {
+        if (this.isPlayer && !this.isDead && this.isNukeAiming) {
+          this.isNukeAiming = false;
+          this.tryNuke();
+        }
+      });
     }
     this.idleTimer = Math.random() * 1000;
   }
@@ -1701,7 +1711,7 @@ export class Tank {
       const d = Phaser.Math.Distance.Between(this.chassis.x, this.chassis.y, player.chassis.x, player.chassis.y);
       const isDesert = this.scene.mapId === 'desert';
       const isMobile = !!(this.scene.sys.game.device.os.android || this.scene.sys.game.device.os.iOS);
-      const aggroMul = isMobile ? 0.5 : 1;
+      const aggroMul = (isMobile ? 0.5 : 1) * this.scene.getEnemyAggroVisionScale();
       const aggroRange = Tank.getAggroRangeFor(this.type) * (isDesert ? 1.3 : 1.0) * aggroMul;
       const spec = SPECS[this.type];
       const slopeDegrees = Math.abs(Phaser.Math.RadToDeg(this.chassis.rotation));
@@ -2138,6 +2148,13 @@ export class Tank {
 
   public destroy() {
     this.active = false;
+    const kb = this.scene?.input?.keyboard;
+    if (kb && this.keyboardListeners.length > 0) {
+      for (const l of this.keyboardListeners) {
+        try { kb.off(l.event, l.fn); } catch {}
+      }
+      this.keyboardListeners.length = 0;
+    }
     if (!this.isPlayer) {
       this.scene.audio.stopLoop(`e_idle_${this.audioInstanceId}`, 0);
       this.scene.audio.stopLoop(`e_hunter_rise_${this.audioInstanceId}`, 0);
@@ -3855,6 +3872,9 @@ export class LandSubmarine extends Phaser.Physics.Arcade.Sprite {
     const surfaceY = this.mode === 'LAKE' && this.lake ? this.lake.waterY : terrainY;
     const diveY = this.mode === 'LAKE' ? (surfaceY + 260) : (terrainY + 240);
     const surfaceBodyY = this.mode === 'LAKE' ? (surfaceY + 40) : (terrainY - 90);
+    const isMobile = !!(this.sceneRef.sys.game.device.os.android || this.sceneRef.sys.game.device.os.iOS);
+    const aggroRange = 1800 * (isMobile ? 0.5 : 1) * this.sceneRef.getEnemyAggroVisionScale();
+    const distToPlayer = Phaser.Math.Distance.Between(this.x, this.y, player.chassis.x, player.chassis.y);
     this.laser.clear();
 
     if (this.mode === 'LAKE' && this.lake) {
@@ -3891,60 +3911,65 @@ export class LandSubmarine extends Phaser.Physics.Arcade.Sprite {
           this.periscope.fillRect(this.x + (this.flipX ? -12 : 4), surfaceY - periH + 2, 8, 6);
         }
 
-        const pvx = player.chassis.body?.velocity?.x ?? 0;
-        const behindDir = Math.abs(pvx) > 25 ? (pvx > 0 ? -1 : 1) : (player.chassis.flipX ? 1 : -1);
-        const targetX = player.chassis.x + behindDir * 650;
-        const dx = targetX - this.x;
-        const dist = Math.abs(dx);
-        const dir = dx > 0 ? 1 : -1;
-        
-        // Emulate moving underground / underwater
-        if (dist > 70) {
-            this.body.setVelocityX(dir * (this.mode === 'LAKE' ? 380 : 260));
-            this.setFlipX(dir < 0);
-            
-            if (time > this.lastTrailT + 180) {
-                this.lastTrailT = time;
-                if (this.mode !== 'LAKE') {
-                  this.sceneRef.particles.createDirtImpact(this.x + Phaser.Math.Between(-10, 10), terrainY + Phaser.Math.Between(-2, 4));
-                } else {
-                  this.sceneRef.particles.createWaterSplash(this.x + Phaser.Math.Between(-14, 14), surfaceY + 2, 110);
-                }
-            }
-        } else {
+        if (distToPlayer > aggroRange) {
             this.body.setVelocityX(0);
-            // Ready to surface
-            if (time > this.lastActionT + 7000) {
-                this.aiState = 'SURFACING';
-                this.periscope.setVisible(false);
-                this.setAlpha(0.25);
-                this.hull.setVisible(true);
-                this.hull.setAlpha(0.25);
-                if (this.mode !== 'LAKE') this.sceneRef.particles.createCraterDebris(this.x, terrainY, 180);
-                this.lastDrillDustT = time;
-                this.sceneRef.tweens.add({
-                    targets: this,
-                    y: surfaceBodyY,
-                    alpha: 1,
-                    duration: 1050,
-                    ease: 'Quad.out',
-                    onUpdate: () => {
-                        const now = this.sceneRef.time.now;
-                        if (now > this.lastDrillDustT + 90) {
-                            this.lastDrillDustT = now;
-                            if (this.mode !== 'LAKE') this.sceneRef.particles.createDirtImpact(this.x + Phaser.Math.Between(-16, 16), terrainY + Phaser.Math.Between(-4, 6));
-                        }
-                    },
-                    onComplete: () => {
-                        this.aiState = 'LOCKING';
-                        this.setAlpha(1);
-                        this.surfacedAtT = this.sceneRef.time.now;
-                        this.lockStartedAtT = this.surfacedAtT;
-                        this.lastShotT = this.surfacedAtT;
-                        this.shotsFired = 0;
-                        this.volleyFired = false;
+            this.lastActionT = time;
+        } else {
+            const pvx = player.chassis.body?.velocity?.x ?? 0;
+            const behindDir = Math.abs(pvx) > 25 ? (pvx > 0 ? -1 : 1) : (player.chassis.flipX ? 1 : -1);
+            const targetX = player.chassis.x + behindDir * 650;
+            const dx = targetX - this.x;
+            const dist = Math.abs(dx);
+            const dir = dx > 0 ? 1 : -1;
+            
+            // Emulate moving underground / underwater
+            if (dist > 70) {
+                this.body.setVelocityX(dir * (this.mode === 'LAKE' ? 380 : 260));
+                this.setFlipX(dir < 0);
+                
+                if (time > this.lastTrailT + 180) {
+                    this.lastTrailT = time;
+                    if (this.mode !== 'LAKE') {
+                      this.sceneRef.particles.createDirtImpact(this.x + Phaser.Math.Between(-10, 10), terrainY + Phaser.Math.Between(-2, 4));
+                    } else {
+                      this.sceneRef.particles.createWaterSplash(this.x + Phaser.Math.Between(-14, 14), surfaceY + 2, 110);
                     }
-                });
+                }
+            } else {
+                this.body.setVelocityX(0);
+                // Ready to surface
+                if (time > this.lastActionT + 7000) {
+                    this.aiState = 'SURFACING';
+                    this.periscope.setVisible(false);
+                    this.setAlpha(0.25);
+                    this.hull.setVisible(true);
+                    this.hull.setAlpha(0.25);
+                    if (this.mode !== 'LAKE') this.sceneRef.particles.createCraterDebris(this.x, terrainY, 180);
+                    this.lastDrillDustT = time;
+                    this.sceneRef.tweens.add({
+                        targets: this,
+                        y: surfaceBodyY,
+                        alpha: 1,
+                        duration: 1050,
+                        ease: 'Quad.out',
+                        onUpdate: () => {
+                            const now = this.sceneRef.time.now;
+                            if (now > this.lastDrillDustT + 90) {
+                                this.lastDrillDustT = now;
+                                if (this.mode !== 'LAKE') this.sceneRef.particles.createDirtImpact(this.x + Phaser.Math.Between(-16, 16), terrainY + Phaser.Math.Between(-4, 6));
+                            }
+                        },
+                        onComplete: () => {
+                            this.aiState = 'LOCKING';
+                            this.setAlpha(1);
+                            this.surfacedAtT = this.sceneRef.time.now;
+                            this.lockStartedAtT = this.surfacedAtT;
+                            this.lastShotT = this.surfacedAtT;
+                            this.shotsFired = 0;
+                            this.volleyFired = false;
+                        }
+                    });
+                }
             }
         }
     } else if (this.aiState === 'SURFACING') {

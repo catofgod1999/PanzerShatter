@@ -105,6 +105,11 @@ export class MainScene extends Phaser.Scene {
   private playerTreeCollider?: Phaser.Physics.Arcade.Collider;
   private playerEnemiesCollider?: Phaser.Physics.Arcade.Collider;
   private onRedeployHandler?: EventListener;
+  private onKillFeedHandler?: (ev: any) => void;
+  private onUpdateHudHandler?: (data: any) => void;
+  private onPlayerNukeHandler?: (data: any) => void;
+  private onCombatDamageHandler?: () => void;
+  private onCombatActivityHandler?: () => void;
   
   private WORLD_WIDTH = 50000; 
   private readonly TERRAIN_STEP = 20;
@@ -167,6 +172,7 @@ export class MainScene extends Phaser.Scene {
   private lastTerrainPhysicsT = 0;
   private lastVegetationSnapT = 0;
   private lastDistantHibernateT = 0;
+  private lastDormantPruneT = 0;
   private lastFaunaUpdateT = 0;
   private lastVegetationInteractionT = 0;
   private lastWaterPlantUpdateT = 0;
@@ -437,6 +443,10 @@ export class MainScene extends Phaser.Scene {
     this.lastFaunaUpdateT = 0;
     this.lastVegetationInteractionT = 0;
     this.lastWaterPlantUpdateT = 0;
+    this.lastTerrainPhysicsT = 0;
+    this.lastVegetationSnapT = 0;
+    this.lastDistantHibernateT = 0;
+    this.lastDormantPruneT = 0;
     this.perfPanelEnabled = false;
     this.perfLastEmitT = 0;
     this.perfSampleFrames = 0;
@@ -700,16 +710,19 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
-    this.events.on('kill-feed', (ev: any) => {
+    if (this.onKillFeedHandler) this.events.off('kill-feed', this.onKillFeedHandler);
+    this.onKillFeedHandler = (ev: any) => {
       const kind = ev?.kind as string | undefined;
       const label = (ev?.label as string | undefined) ?? '';
       const points = Number(ev?.points ?? 0);
       const tag = (ev?.tag as string | undefined) ?? '';
       const bonus = Number(ev?.bonusPoints ?? 0);
       this.addKillFeedEntry(kind, label, points, tag, bonus);
-    });
+    };
+    this.events.on('kill-feed', this.onKillFeedHandler);
 
-    this.events.on('update-hud', (data: any) => {
+    if (this.onUpdateHudHandler) this.events.off('update-hud', this.onUpdateHudHandler);
+    this.onUpdateHudHandler = (data: any) => {
       const hullEl = document.getElementById('hull-health');
       if (hullEl) hullEl.innerText = `车体状态: ${Math.ceil(data.hp)}%`;
       const ammoEl = document.getElementById('ammo-status');
@@ -733,9 +746,11 @@ export class MainScene extends Phaser.Scene {
         const scoreEl = document.getElementById('total-score');
         if (scoreEl) scoreEl.innerText = `总积分: ${Math.round(data.totalScore)}`;
       }
-    });
+    };
+    this.events.on('update-hud', this.onUpdateHudHandler);
 
-    this.events.on('player-nuke', (data: any) => {
+    if (this.onPlayerNukeHandler) this.events.off('player-nuke', this.onPlayerNukeHandler);
+    this.onPlayerNukeHandler = (data: any) => {
       const x = typeof data?.x === 'number' ? data.x : this.aimWorld.x;
       const y = typeof data?.y === 'number' ? data.y : this.aimWorld.y;
       const owner = data?.owner as Tank | undefined;
@@ -749,17 +764,22 @@ export class MainScene extends Phaser.Scene {
           this.player?.setNoCooldown(false);
         }
       }
-    });
+    };
+    this.events.on('player-nuke', this.onPlayerNukeHandler);
 
-    this.events.on('combat-damage', () => {
+    if (this.onCombatDamageHandler) this.events.off('combat-damage', this.onCombatDamageHandler);
+    this.onCombatDamageHandler = () => {
       if (this.mapId !== 'forest') return;
       this.noteCombatDamage(this.time.now);
-    });
+    };
+    this.events.on('combat-damage', this.onCombatDamageHandler);
 
-    this.events.on('combat-activity', () => {
+    if (this.onCombatActivityHandler) this.events.off('combat-activity', this.onCombatActivityHandler);
+    this.onCombatActivityHandler = () => {
       if (this.mapId !== 'forest') return;
       this.noteEnemyCombatActivity(this.time.now);
-    });
+    };
+    this.events.on('combat-activity', this.onCombatActivityHandler);
 
     if (this.tutorialMode) {
       this.tutorialPlayerShellHandler = (ev: any) => {
@@ -813,6 +833,16 @@ export class MainScene extends Phaser.Scene {
     window.addEventListener('panzer-default-zoom', this.onDefaultZoomHandler);
     if (this.testRoomEnabled) this.setupTestRoomHooks();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.onKillFeedHandler) this.events.off('kill-feed', this.onKillFeedHandler);
+      if (this.onUpdateHudHandler) this.events.off('update-hud', this.onUpdateHudHandler);
+      if (this.onPlayerNukeHandler) this.events.off('player-nuke', this.onPlayerNukeHandler);
+      if (this.onCombatDamageHandler) this.events.off('combat-damage', this.onCombatDamageHandler);
+      if (this.onCombatActivityHandler) this.events.off('combat-activity', this.onCombatActivityHandler);
+      this.onKillFeedHandler = undefined;
+      this.onUpdateHudHandler = undefined;
+      this.onPlayerNukeHandler = undefined;
+      this.onCombatDamageHandler = undefined;
+      this.onCombatActivityHandler = undefined;
       if (this.onRedeployHandler) window.removeEventListener('panzer-redeploy', this.onRedeployHandler);
       if (this.onDefaultZoomHandler) window.removeEventListener('panzer-default-zoom', this.onDefaultZoomHandler);
       if (this.onTestRoomCommand) window.removeEventListener('panzer-testroom-command', this.onTestRoomCommand);
@@ -901,6 +931,11 @@ export class MainScene extends Phaser.Scene {
       try { window.localStorage.setItem(key, z.toFixed(1)); } catch {}
     }
     return Math.round(z * 10) / 10;
+  }
+
+  public getEnemyAggroVisionScale(): number {
+    const z = Number.isFinite(this.defaultZoom) ? this.defaultZoom : 1;
+    return Phaser.Math.Clamp(2 - z, 0.5, 1.5);
   }
 
   private updateCooldownPanel(now: number) {
@@ -2834,6 +2869,17 @@ export class MainScene extends Phaser.Scene {
     this.drawTerrain();
   }
 
+  private computeVehicleKillPointsByHp(basePoints: number, source?: any): number {
+    const base = Number.isFinite(basePoints) && basePoints > 0 ? basePoints : 1000;
+    const hpRaw = Number(source?.maxHp ?? source?.hp);
+    if (!Number.isFinite(hpRaw) || hpRaw <= 0) return Math.round(base);
+
+    const hpRatio = Phaser.Math.Clamp(Math.sqrt(hpRaw / 1200), 0.7, 2.4);
+    const adjusted = Math.round((base * hpRatio) / 10) * 10;
+    const minPoints = Math.round(base * 0.7);
+    return Phaser.Math.Clamp(adjusted, minPoints, 3000);
+  }
+
   public recordEnemyVehicleKill(label: string, points: number, source?: any, shellType?: ShellType) {
     // Only award points/feedback if the killer is the player
     const now = this.time?.now ?? 0;
@@ -2865,13 +2911,15 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
+    const killPoints = this.computeVehicleKillPointsByHp(points, source);
+
     this.vehicleKills++;
-    this.vehicleKillBreakdown.push({ label, points });
-    this.score += points;
+    this.vehicleKillBreakdown.push({ label, points: killPoints });
+    this.score += killPoints;
     this.events.emit('update-hud', { hp: (this.player?.hp && this.player?.maxHp ? (this.player.hp / this.player.maxHp) * 100 : 100), shell: this.player ? ShellType[this.player.currentShell] : 'STANDARD', totalScore: this.score });
-    this.events.emit('kill-feed', { kind: 'vehicle', label, points, t: this.time.now });
+    this.events.emit('kill-feed', { kind: 'vehicle', label, points: killPoints, t: this.time.now });
     if (shellType === ShellType.AP) {
-      this.awardEventPoints('special', '秒杀！', 100, '穿甲弹击毁载具');
+      this.awardEventPoints('special', '颗秒！', 100, '穿甲弹击毁载具');
     }
   }
 
@@ -4140,6 +4188,50 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  private pruneVeryDistantDormantObjects() {
+    const px = this.player?.chassis?.active ? this.player.chassis.x : Number.NaN;
+    if (!Number.isFinite(px)) return;
+
+    // Keep a wide safety band. Only prune objects that are already dormant.
+    const keepLeft = Math.max(0, px - 14000);
+    const keepRight = Math.min(this.WORLD_WIDTH, px + 10000);
+
+    const pruneDormantGroup = (group: Phaser.GameObjects.Group | Phaser.Physics.Arcade.Group | Phaser.Physics.Arcade.StaticGroup | undefined) => {
+      const children = group?.getChildren?.() as any[] | undefined;
+      if (!Array.isArray(children) || children.length <= 0) return;
+      for (let i = children.length - 1; i >= 0; i--) {
+        const o = children[i];
+        if (!o || o.active) continue;
+        const x = typeof o.x === 'number' ? o.x : Number.NaN;
+        if (!Number.isFinite(x)) continue;
+        if (x >= keepLeft && x <= keepRight) continue;
+        try { o.destroy(); } catch {}
+      }
+    };
+
+    pruneDormantGroup(this.vegetationGroup as any);
+    pruneDormantGroup(this.treeGroup as any);
+    pruneDormantGroup(this.faunaGroup as any);
+
+    const debris = this.debrisGroup?.getChildren?.() as any[] | undefined;
+    if (Array.isArray(debris) && debris.length > 0) {
+      for (let i = debris.length - 1; i >= 0; i--) {
+        const d = debris[i];
+        if (!d || d.active) continue;
+        const x = typeof d.x === 'number' ? d.x : Number.NaN;
+        if (!Number.isFinite(x) || (x >= keepLeft && x <= keepRight)) continue;
+        const hibernating = d.getData?.('hibernating') === true || d.getData?.('sleeping') === true;
+        if (!hibernating) continue;
+        try { d.destroy(); } catch {}
+      }
+    }
+
+    for (let i = this.animals.length - 1; i >= 0; i--) {
+      const a = this.animals[i];
+      if (!a || !a.active) this.animals.splice(i, 1);
+    }
+  }
+
   private spawnLakeLife(lake: (typeof this.lakes)[number]) {
     const span = lake.x1 - lake.x0;
     if (span < 600) return;
@@ -4936,6 +5028,14 @@ export class MainScene extends Phaser.Scene {
         break;
     }
 
+    // Safe-zone BGM rule:
+    // - No fade-in on target track.
+    // - Only previous track fades out for 1s.
+    if (state === 'safezone') {
+      fadeInMs = 0;
+      fadeOutMs = 1000;
+    }
+
     const prevLoopId = this.forestBgmActiveLoopId;
     const nextLoopId = this.getNextForestBgmLoopId();
     this.audio.startLoop(nextLoopId, folder, {
@@ -4963,9 +5063,9 @@ export class MainScene extends Phaser.Scene {
     if (this.forestBgmQueuedState === state && this.forestBgmQueuedTransition === transition) return;
 
     // Wwise-style Next Bar rules:
-    // 1) any -> pre_final_safe_zone (safezone)
-    // 2) any -> non_combat (explore)
-    const useNextBar = (state === 'safezone' || state === 'explore') && this.forestBgmCurrent !== null;
+    // Only explore keeps next-bar scheduling.
+    // Safe-zone switches immediately (no next-bar wait).
+    const useNextBar = state === 'explore' && this.forestBgmCurrent !== null;
     if (useNextBar) {
       const delayMs = this.getForestBgmNextBarDelayMs(now);
       if (delayMs > 0) {
@@ -5698,8 +5798,66 @@ export class MainScene extends Phaser.Scene {
     this.forestExitTriggered = true;
     this.cameras.main.fade(900, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.showForestUnderDevelopmentScreen();
+    });
+  }
+
+  private showForestUnderDevelopmentScreen() {
+    this.softResetAudioForSceneTransition();
+    this.physics.world.isPaused = true;
+    this.cameras.main.stopFollow();
+    this.cameras.main.resetFX();
+    try { this.scene.stop('UIScene'); } catch {}
+
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const blocker = this.add
+      .rectangle(w * 0.5, h * 0.5, w, h, 0x000000, 1)
+      .setScrollFactor(0)
+      .setDepth(100000);
+    blocker.setInteractive({ useHandCursor: false });
+
+    const title = this.add.text(w * 0.5, h * 0.5 - 8, '游戏开发中……', {
+      fontFamily: 'Arial Black',
+      fontSize: `${Math.round(Phaser.Math.Clamp(w * 0.08, 52, 112))}px`,
+      color: '#f3f6ff',
+      stroke: '#000000',
+      strokeThickness: 8
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(100001);
+
+    const hint = this.add.text(w * 0.5, h * 0.5 + Math.round(Phaser.Math.Clamp(h * 0.11, 72, 140)), '点击任意位置返回主菜单', {
+      fontFamily: 'Arial Black',
+      fontSize: `${Math.round(Phaser.Math.Clamp(w * 0.027, 20, 38))}px`,
+      color: '#9aa8bf',
+      stroke: '#000000',
+      strokeThickness: 6
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(100001);
+
+    let leaving = false;
+    const goMenu = () => {
+      if (leaving) return;
+      leaving = true;
+      try { this.input.off('pointerdown', goMenu, this); } catch {}
+      try { blocker.off('pointerdown', goMenu); } catch {}
       this.softResetAudioForSceneTransition();
-      this.scene.restart({ mapId: 'desert' });
+      this.scene.start('MenuScene');
+    };
+
+    this.input.on('pointerdown', goMenu, this);
+    blocker.on('pointerdown', goMenu);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      try { this.input.off('pointerdown', goMenu, this); } catch {}
+      try { blocker.off('pointerdown', goMenu); } catch {}
+      try { blocker.destroy(); } catch {}
+      try { title.destroy(); } catch {}
+      try { hint.destroy(); } catch {}
     });
   }
 
@@ -7429,6 +7587,10 @@ export class MainScene extends Phaser.Scene {
     if (time > this.lastDistantHibernateT + 700) {
       this.lastDistantHibernateT = time;
       this.updateDistantObjects();
+    }
+    if (time > this.lastDormantPruneT + 2600) {
+      this.lastDormantPruneT = time;
+      this.pruneVeryDistantDormantObjects();
     }
     this.perfRecord('terrain_maintenance', perfSectionStart);
     

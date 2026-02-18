@@ -82,7 +82,7 @@ export class Helicopter extends Phaser.Physics.Arcade.Sprite {
     const dist = Phaser.Math.Distance.Between(this.x, this.y, player.chassis.x, player.chassis.y);
     
     const isMobile = !!(this.sceneRef.sys.game.device.os.android || this.sceneRef.sys.game.device.os.iOS);
-    const aggroRange = 1800 * (isMobile ? 0.5 : 1);
+    const aggroRange = 1800 * (isMobile ? 0.5 : 1) * this.sceneRef.getEnemyAggroVisionScale();
     if (dist < aggroRange) {
         const targetX = player.chassis.x + 400;
         const moveX = (targetX - this.x) * 0.02;

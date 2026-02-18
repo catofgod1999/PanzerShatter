@@ -311,7 +311,7 @@ export class InfantryManager {
     const allowMove = !(this.scene.testRoomEnabled && !this.isAllyTeam && !this.scene.testRoomAllowEnemyMove);
     const allowAttack = !(this.scene.testRoomEnabled && !this.isAllyTeam && !this.scene.testRoomAllowEnemyAttack);
     const isMobile = !!(this.scene.sys.game.device.os.android || this.scene.sys.game.device.os.iOS);
-    const aggroMul = isMobile ? 0.5 : 1;
+    const aggroMul = (isMobile ? 0.5 : 1) * (this.isAllyTeam ? 1 : this.scene.getEnemyAggroVisionScale());
     this.soldiers = this.soldiers.filter(s => {
       if (!s.active) return false;
       if (s.getData('retired')) { s.setState(State.IDLE, 1); s.update(this.scene, delta, this); return true; }
