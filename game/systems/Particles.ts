@@ -235,16 +235,16 @@ export class ParticleSystems {
     if (this.cinematicGrade.vignette) {
       const v = this.cinematicGrade.vignette;
       v.setPosition(x0 + viewW * 0.5, y0 + viewH * 0.5);
-      v.setScale((viewW / 512) * 1.22, (viewH / 512) * 1.22);
-      v.setAlpha(0.20 + combatK * 0.13 + breathe * 0.015);
+      v.setScale((viewW / 512) * 1.38, (viewH / 512) * 1.38);
+      v.setAlpha(0.19 + combatK * 0.12 + breathe * 0.014);
     }
 
     if (this.cinematicGrade.centerLift) {
       const lift = this.cinematicGrade.centerLift;
       const scale = Math.max(viewW, viewH) / 64;
       lift.setPosition(x0 + viewW * 0.5, y0 + viewH * 0.56);
-      lift.setScale(scale * 1.44, scale * 1.08);
-      lift.setAlpha(0.045 + breathe * 0.035 + combatK * 0.05);
+      lift.setScale(scale * 1.56, scale * 1.18);
+      lift.setAlpha(0.04 + breathe * 0.03 + combatK * 0.044);
     }
   }
 
@@ -404,13 +404,13 @@ export class ParticleSystems {
       const bloom = this.scene.add.image(screenX, screenY, 'fx_soft_glow').setDepth(118).setScrollFactor(0);
       bloom.setBlendMode(Phaser.BlendModes.ADD);
       bloom.setTint(color);
-      bloom.setAlpha(strength * 0.48 * (this.fxMul < 0.85 ? 0.88 : 1));
-      bloom.setScale((cam.width / 64) * 0.24, (cam.height / 64) * 0.22);
+      bloom.setAlpha(strength * 0.54 * (this.fxMul < 0.85 ? 0.88 : 1));
+      bloom.setScale((cam.width / 64) * 0.23, (cam.height / 64) * 0.21);
       this.scene.tweens.add({
         targets: bloom,
         alpha: 0,
-        scaleX: bloom.scaleX * 1.8,
-        scaleY: bloom.scaleY * 1.62,
+        scaleX: bloom.scaleX * 1.66,
+        scaleY: bloom.scaleY * 1.48,
         duration,
         ease: 'Quad.out',
         onComplete: () => {
@@ -420,18 +420,38 @@ export class ParticleSystems {
       });
     }
 
+    if (this.scene.textures.exists('fx_soft_ring') && this.tryReserveGlow(0.32 + strength * 0.28)) {
+      const flashRing = this.scene.add.image(screenX, screenY, 'fx_soft_ring').setDepth(119).setScrollFactor(0);
+      flashRing.setBlendMode(Phaser.BlendModes.ADD);
+      flashRing.setTint(this.mixColor(color, 0xfff0dc, 0.24));
+      flashRing.setAlpha(strength * 0.28 * (this.fxMul < 0.85 ? 0.86 : 1));
+      flashRing.setScale((cam.width / 128) * 0.2, (cam.height / 128) * 0.2);
+      this.scene.tweens.add({
+        targets: flashRing,
+        alpha: 0,
+        scaleX: flashRing.scaleX * 2.35,
+        scaleY: flashRing.scaleY * 2.06,
+        duration: Math.max(90, Math.round(duration * 0.82)),
+        ease: 'Cubic.out',
+        onComplete: () => {
+          flashRing.destroy();
+          this.releaseGlow(0.32 + strength * 0.28);
+        }
+      });
+    }
+
     if (this.scene.textures.exists('fx_soft_glow') && this.tryReserveGlow(0.46 + strength * 0.5)) {
       const screenBloom = this.scene.add.image(cam.width * 0.5, cam.height * 0.5, 'fx_soft_glow').setDepth(117).setScrollFactor(0);
       screenBloom.setBlendMode(Phaser.BlendModes.ADD);
       screenBloom.setTint(color);
-      screenBloom.setAlpha(strength * 0.2 * (this.fxMul < 0.85 ? 0.82 : 1));
-      screenBloom.setScale((cam.width / 64) * 0.58, (cam.height / 64) * 0.56);
+      screenBloom.setAlpha(strength * 0.11 * (this.fxMul < 0.85 ? 0.8 : 1));
+      screenBloom.setScale((cam.width / 64) * 0.42, (cam.height / 64) * 0.4);
       this.scene.tweens.add({
         targets: screenBloom,
         alpha: 0,
-        scaleX: screenBloom.scaleX * 1.25,
-        scaleY: screenBloom.scaleY * 1.18,
-        duration: Math.max(90, Math.round(duration * 0.9)),
+        scaleX: screenBloom.scaleX * 1.16,
+        scaleY: screenBloom.scaleY * 1.12,
+        duration: Math.max(80, Math.round(duration * 0.74)),
         ease: 'Sine.out',
         onComplete: () => {
           screenBloom.destroy();
@@ -2095,7 +2115,7 @@ export class ParticleSystems {
     this.spawnCinematicGlow(x, y, {
       radius: radius * (isHE ? 1.75 : 1.28),
       color: isHE ? 0xffb06a : 0xffc79a,
-      alpha: isHE ? 0.42 : 0.28,
+      alpha: isHE ? 0.46 : 0.32,
       durationMs: isHE ? 760 : 520,
       depth: 102,
       scaleMul: isHE ? 2.55 : 2.1
@@ -2103,7 +2123,7 @@ export class ParticleSystems {
     this.spawnSoftShockRing(x, y, {
       radius: radius * (isHE ? 1.6 : 1.25),
       color: isHE ? 0xffc286 : 0xffd2ae,
-      alpha: isHE ? 0.2 : 0.14,
+      alpha: isHE ? 0.23 : 0.17,
       durationMs: isHE ? 420 : 300,
       depth: 101,
       expand: isHE ? 4.6 : 3.9,
@@ -2113,8 +2133,8 @@ export class ParticleSystems {
     this.scene.time.delayedCall(isHE ? 110 : 90, () => {
       this.spawnCinematicGlow(x, y, {
         radius: radius * (isHE ? 2.3 : 1.85),
-        color: isHE ? 0xffd7a8 : 0xffe1c4,
-        alpha: isHE ? 0.16 : 0.14,
+        color: isHE ? 0xffdaaa : 0xffe8cd,
+        alpha: isHE ? 0.19 : 0.16,
         durationMs: isHE ? 980 : 700,
         depth: 100,
         scaleMul: isHE ? 2.9 : 2.45
@@ -2128,14 +2148,23 @@ export class ParticleSystems {
         expand: isHE ? 5.2 : 4.5,
         anisotropy: 0.8
       });
+      this.spawnSoftShockRing(x, y + 2, {
+        radius: radius * (isHE ? 1.42 : 1.2),
+        color: isHE ? 0xfff1d2 : 0xffedd8,
+        alpha: isHE ? 0.08 : 0.06,
+        durationMs: isHE ? 360 : 280,
+        depth: 100,
+        expand: isHE ? 3.6 : 3.1,
+        anisotropy: 0.9
+      });
     });
 
     if (this.isNearCamera(x, y, 320)) {
       this.combatPulseUntil = Math.max(this.combatPulseUntil, this.scene.time.now + (isHE ? 900 : 600));
       this.emitScreenExposurePulse(x, y, {
-        strength: isHE ? 0.56 : 0.38,
+        strength: isHE ? 0.46 : 0.3,
         color: isHE ? 0xffbf82 : 0xffd7b0,
-        durationMs: isHE ? 420 : 320
+        durationMs: isHE ? 360 : 270
       });
     }
     this.pulseNearbyTankHighlights(x, y, radius * (isHE ? 8 : 6), 0.9 + heK * 0.55);
@@ -2160,7 +2189,7 @@ export class ParticleSystems {
       speed: { min: 100, max: isHE ? 500 : 300 },
       scale: { start: isHE ? 5.6 : 2.8, end: 0 },
       lifespan: isHE ? 760 : 420,
-      quantity: this.q(isHE ? 72 : 28),
+      quantity: this.q(isHE ? 78 : 32),
       emitting: false,
       tint: [0xfff6dc, 0xffd3a2, 0xffa260, 0xff6a2d, 0x2e1d16],
       blendMode: 'ADD'
@@ -2176,7 +2205,7 @@ export class ParticleSystems {
     this.spawnCinematicGlow(x, y, {
       radius: Math.max(92, radius * 1.35),
       color: 0xffb67a,
-      alpha: 0.44,
+      alpha: 0.5,
       durationMs: 820,
       depth: 112,
       scaleMul: 2.6
@@ -2184,7 +2213,7 @@ export class ParticleSystems {
     this.spawnCinematicGlow(x, y + 3, {
       radius: Math.max(96, radius * 1.46),
       color: 0xffd9b8,
-      alpha: 0.24,
+      alpha: 0.28,
       durationMs: 520,
       depth: 110,
       scaleMul: 2.9
@@ -2192,7 +2221,7 @@ export class ParticleSystems {
     this.spawnSoftShockRing(x, y, {
       radius: Math.max(110, radius * 1.65),
       color: 0xffc994,
-      alpha: 0.2,
+      alpha: 0.23,
       durationMs: 520,
       depth: 109,
       expand: 5.0,
@@ -2208,14 +2237,23 @@ export class ParticleSystems {
         expand: 5.6,
         anisotropy: 0.86
       });
+      this.spawnSoftShockRing(x, y + 4, {
+        radius: Math.max(94, radius * 1.32),
+        color: 0xfff0d7,
+        alpha: 0.08,
+        durationMs: 360,
+        depth: 110,
+        expand: 3.8,
+        anisotropy: 0.92
+      });
     });
 
     if (this.isNearCamera(x, y, 420)) {
       this.combatPulseUntil = Math.max(this.combatPulseUntil, this.scene.time.now + 1200);
       this.emitScreenExposurePulse(x, y, {
-        strength: 0.64,
+        strength: 0.5,
         color: 0xffbe80,
-        durationMs: 440
+        durationMs: 360
       });
     }
     this.pulseNearbyTankHighlights(x, y, Math.max(380, radius * 4.6), 1.5);
@@ -2225,9 +2263,9 @@ export class ParticleSystems {
       angle: { min: 210, max: 330 },
       scale: { start: 6.6, end: 0 },
       lifespan: 900,
-      quantity: this.q(Math.round(92 + radius * 0.32)),
+      quantity: this.q(Math.round(98 + radius * 0.36)),
       emitting: false,
-      tint: [0xfff7e2, 0xffdbb0, 0xffaf66, 0xff7b43],
+      tint: [0xfff7e2, 0xffddb8, 0xffb371, 0xff7b43, 0xffe8c2],
       blendMode: 'ADD',
       gravityY: 900
     }).setDepth(104);
@@ -2408,9 +2446,9 @@ export class ParticleSystems {
       });
 
       this.emitScreenExposurePulse(x, y, {
-        strength: 0.90,
+        strength: 0.72,
         color: 0xffd9a6,
-        durationMs: 760
+        durationMs: 620
       });
 
       if (this.scene.textures.exists('fx_soft_glow') && this.tryReserveGlow(1.25)) {

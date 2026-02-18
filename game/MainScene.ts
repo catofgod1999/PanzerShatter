@@ -1314,135 +1314,204 @@ export class MainScene extends Phaser.Scene {
   private createAssets() {
     const g = this.make.graphics({ x: 0, y: 0 }, false);
     const drawTankPart = (prefix: string, bodyColor: number, darkColor: number, isBoxy: boolean = false) => {
-        // --- HULL ---
+        const toColor = (hex: number) => Phaser.Display.Color.IntegerToColor(hex);
+        const shade = (hex: number, delta: number) => {
+            const c = toColor(hex);
+            return Phaser.Display.Color.GetColor(
+                Phaser.Math.Clamp(c.red + delta, 0, 255),
+                Phaser.Math.Clamp(c.green + delta, 0, 255),
+                Phaser.Math.Clamp(c.blue + delta, 0, 255)
+            );
+        };
+
         g.clear();
-        const hullW = 110, hullH = 55;
-        
-        // Tracks (Bottom layer)
-        const trackColor = 0x1a1a1a;
-        const trackH = 12;
-        g.fillStyle(trackColor);
-        g.fillRoundedRect(2, hullH - trackH - 2, hullW - 4, trackH, 4);
-        // Track details (treads)
-        g.fillStyle(0x000000, 0.4);
-        for(let i=4; i<hullW-8; i+=6) {
-            g.fillRect(i, hullH - trackH - 2, 3, trackH);
+        const hullW = 110;
+        const hullH = 55;
+        const trackTop = hullH - 15;
+        const bodyHighlight = shade(bodyColor, 26);
+        const bodyMid = shade(bodyColor, -16);
+        const bodyShadow = shade(bodyColor, -48);
+        const darkHighlight = shade(darkColor, 14);
+
+        g.fillStyle(0x07090b, 1);
+        g.fillRoundedRect(1, trackTop - 2, hullW - 2, 14, 4);
+        g.fillStyle(0x171d24, 0.95);
+        g.fillRoundedRect(3, trackTop, hullW - 6, 10, 4);
+        for (let i = 5; i < hullW - 8; i += 6) {
+            const treadTint = (i / 6) % 2 === 0 ? 0x2b323a : 0x1c2128;
+            g.fillStyle(treadTint, 0.56);
+            g.fillRect(i, trackTop + 1, 3, 8);
+        }
+        g.fillStyle(0x000000, 0.28);
+        g.fillRect(6, trackTop + 8, hullW - 12, 2);
+
+        if (isBoxy) {
+            g.fillStyle(bodyShadow, 1);
+            g.fillRoundedRect(4, 7, 102, 36, 4);
+            g.fillStyle(bodyColor, 1);
+            g.fillRoundedRect(8, 6, 94, 30, 4);
+            g.fillStyle(bodyHighlight, 0.2);
+            g.fillRect(10, 8, 86, 7);
+            g.fillStyle(bodyMid, 0.44);
+            g.fillRect(14, 24, 78, 10);
+            g.fillStyle(darkColor, 0.62);
+            g.fillTriangle(8, 6, 30, 6, 8, 23);
+            g.fillStyle(darkHighlight, 0.55);
+            g.fillRect(80, 11, 17, 18);
+        } else {
+            g.fillStyle(bodyShadow, 1);
+            g.fillRoundedRect(1, 9, 108, 34, 13);
+            g.fillStyle(bodyColor, 1);
+            g.fillRoundedRect(3, 7, 104, 29, 11);
+            g.fillStyle(bodyHighlight, 0.2);
+            g.fillEllipse(53, 13, 84, 10);
+            g.fillStyle(bodyMid, 0.38);
+            g.fillEllipse(56, 29, 90, 13);
+            g.fillStyle(darkColor, 0.4);
+            g.fillTriangle(4, 36, 106, 36, 56, 8);
         }
 
-        // Main Body
-        if (isBoxy) {
-            // German style: Boxy, angular
-            g.fillStyle(darkColor);
-            g.fillRect(5, 5, 100, 40); // Base shadow/dark
-            g.fillStyle(bodyColor);
-            g.fillRect(5, 5, 100, 36); // Main plate
-            
-            // Front Glacis
-            g.fillStyle(Phaser.Display.Color.GetColor(255,255,255), 0.1); // Highlight
-            g.fillTriangle(5, 5, 25, 5, 5, 25);
-            
-            // Side armor details
-            g.fillStyle(darkColor, 0.5);
-            g.fillRect(15, 15, 80, 20); // Side skirt shadow
-        } else {
-            // Soviet style: Sloped, rounded
-            g.fillStyle(darkColor);
-            g.fillRoundedRect(0, 8, 110, 35, 12);
-            g.fillStyle(bodyColor);
-            g.fillRoundedRect(2, 6, 106, 32, 10);
-            
-            // Sloped armor shading
-            g.fillStyle(0x000000, 0.15);
-            g.fillTriangle(2, 38, 108, 38, 55, 6);
+        g.fillStyle(0x11151b, 0.66);
+        for (let i = 0; i < 4; i++) {
+            const sx = isBoxy ? 84 + i * 4 : 79 + i * 5;
+            g.fillRect(sx, 10, 2, 13);
         }
-        
-        // Vents / Engine Grills (Rear)
-        g.fillStyle(0x111111, 0.6);
-        for(let i=0; i<4; i++) {
-             g.fillRect(isBoxy ? 85 + i*4 : 80 + i*5, 10, 2, 12);
+
+        g.lineStyle(1, shade(bodyColor, -70), 0.52);
+        g.beginPath();
+        g.moveTo(14, 18);
+        g.lineTo(92, 18);
+        g.moveTo(18, 29);
+        g.lineTo(88, 29);
+        g.strokePath();
+
+        g.fillStyle(0x0e1116, 0.72);
+        g.fillRoundedRect(18, 16, 15, 7, 2);
+        g.fillRoundedRect(38, 16, 18, 7, 2);
+        g.fillRoundedRect(61, 16, 14, 7, 2);
+
+        g.fillStyle(0x000000, 0.42);
+        for (let i = 0; i < 8; i++) {
+            const bx = 13 + i * 11;
+            g.fillCircle(bx, 35, 1.2);
         }
 
         g.generateTexture(`${prefix}_hull`, hullW, hullH);
-        
-        // --- WHEEL ---
+
         g.clear();
         const wheelSize = 40;
-        const r = wheelSize / 2;
-        g.fillStyle(0x0a0a0a); 
-        g.fillCircle(r, r, r); // Tire
-        g.fillStyle(0x222222); 
-        g.fillCircle(r, r, r - 4); // Rim dark
-        g.fillStyle(bodyColor);
-        g.fillCircle(r, r, r - 8); // Hub cap
-        // Bolts
-        g.fillStyle(0x111111);
-        for(let i=0; i<6; i++) {
-            const a = (i / 6) * Math.PI * 2;
-            g.fillCircle(r + Math.cos(a)*(r-12), r + Math.sin(a)*(r-12), 1.5);
+        const r = wheelSize * 0.5;
+        g.fillStyle(0x06080a, 1);
+        g.fillCircle(r, r, r);
+        g.fillStyle(0x1a2027, 1);
+        g.fillCircle(r, r, r - 4);
+        g.fillStyle(shade(darkColor, 4), 1);
+        g.fillCircle(r, r, r - 8.2);
+        g.fillStyle(shade(bodyColor, -4), 0.95);
+        g.fillCircle(r, r, r - 11.8);
+        g.fillStyle(bodyHighlight, 0.28);
+        g.fillEllipse(r - 2, r - 3, 10, 7);
+        g.fillStyle(0x0e1117, 1);
+        g.fillCircle(r, r, 3.3);
+        g.fillStyle(0x2a323b, 0.88);
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2;
+            g.fillCircle(r + Math.cos(a) * (r - 11), r + Math.sin(a) * (r - 11), 1.55);
         }
         g.generateTexture(`${prefix}_wheel`, wheelSize, wheelSize);
 
-        // --- TURRET ---
         g.clear();
         if (prefix === 'stug' || prefix === 'a7v') {
              g.generateTexture(`${prefix}_turret`, 1, 1);
         } else {
-            const tW = 65, tH = 36;
+            const tW = 65;
+            const tH = 36;
             if (isBoxy) {
-                // Boxy turret (Tiger/Pz)
-                g.fillStyle(darkColor);
-                g.fillRect(0, 4, tW, tH - 8);
-                g.fillStyle(bodyColor);
-                g.fillRect(4, 0, tW - 8, tH - 4);
-                // Cupola
-                g.fillStyle(darkColor);
-                g.fillRect(10, -4, 16, 6);
+                g.fillStyle(shade(bodyColor, -58), 1);
+                g.fillRoundedRect(0, 4, tW, tH - 8, 4);
+                g.fillStyle(bodyColor, 1);
+                g.fillRoundedRect(4, 1, tW - 8, tH - 7, 4);
+                g.fillStyle(bodyHighlight, 0.22);
+                g.fillRect(7, 3, tW - 20, 6);
+                g.fillStyle(shade(bodyColor, -30), 0.5);
+                g.fillRect(11, 16, tW - 24, 8);
+                g.fillStyle(shade(darkColor, -6), 1);
+                g.fillRoundedRect(11, 0, 16, 6, 2);
+                g.fillStyle(shade(darkColor, 20), 0.65);
+                g.fillCircle(18, 3, 1.4);
             } else {
-                // Rounded turret (T-34/Soviet)
-                g.fillStyle(darkColor);
-                g.fillEllipse(tW/2, tH/2 + 2, tW, tH);
-                g.fillStyle(bodyColor);
-                g.fillEllipse(tW/2, tH/2 - 2, tW * 0.9, tH * 0.85);
-                // Cupola
-                g.fillStyle(darkColor);
-                g.fillEllipse(20, 5, 14, 8);
+                g.fillStyle(shade(bodyColor, -50), 1);
+                g.fillEllipse(tW * 0.5, tH * 0.58, tW, tH);
+                g.fillStyle(bodyColor, 1);
+                g.fillEllipse(tW * 0.5, tH * 0.48, tW * 0.9, tH * 0.84);
+                g.fillStyle(bodyHighlight, 0.22);
+                g.fillEllipse(tW * 0.47, 10, tW * 0.55, 8);
+                g.fillStyle(shade(bodyColor, -24), 0.5);
+                g.fillEllipse(tW * 0.57, 21, tW * 0.58, 11);
+                g.fillStyle(shade(darkColor, -2), 1);
+                g.fillEllipse(20, 6, 15, 8);
+                g.fillStyle(shade(darkColor, 20), 0.62);
+                g.fillCircle(23, 5, 1.4);
             }
+            g.fillStyle(0x0f141b, 0.76);
+            g.fillRoundedRect(36, 13, 12, 6, 2);
             g.generateTexture(`${prefix}_turret`, tW, tH);
         }
 
-        // --- BARREL ---
         [0, 1, 2, 3, 4].forEach(idx => {
-            g.clear(); 
-            const bL = 100, bH = 50;
-            const cy = bH / 2;
-            const width = prefix === 'maus' ? 14 : 9;
-            
-            // Mantlet (Base of barrel)
-            g.fillStyle(darkColor);
-            g.fillCircle(10, cy, width * 1.2);
-            
-            // Tube
-            g.fillStyle(0x1a1a1a);
-            g.fillRect(10, cy - width/2, 80, width);
-            // Highlight
-            g.fillStyle(0xffffff, 0.15);
-            g.fillRect(10, cy - width/4, 80, width/3);
-            
-            // Muzzle brake (optional based on index or random, but let's keep simple)
-            g.fillStyle(0x111111);
-            g.fillRect(86, cy - width * 0.8, 10, width * 1.6); // Brake
+            g.clear();
+            const bL = 100;
+            const bH = 50;
+            const cy = bH * 0.5;
+            const width = prefix === 'maus' ? 13.5 : 9.2;
+            const sway = (idx - 2) * 0.26;
+
+            g.fillStyle(shade(darkColor, -8), 1);
+            g.fillCircle(10, cy, width * 1.18);
+            g.fillStyle(shade(bodyColor, -26), 0.95);
+            g.fillCircle(10, cy, width * 0.8);
+
+            g.fillStyle(0x10151b, 1);
+            g.fillRoundedRect(10, cy - width * 0.5 + sway, 80, width, 3);
+            g.fillStyle(shade(bodyColor, -16), 0.58);
+            g.fillRect(14, cy - width * 0.32 + sway, 70, width * 0.22);
+            g.fillStyle(0x0a0d12, 0.9);
+            g.fillRect(26, cy - width * 0.5 + sway, 2, width);
+            g.fillRect(46, cy - width * 0.5 + sway, 2, width);
+            g.fillRect(66, cy - width * 0.5 + sway, 2, width);
+
+            g.fillStyle(0x0a0d11, 1);
+            g.fillRoundedRect(87, cy - width * 0.8 + sway * 0.8, 10, width * 1.6, 2);
+            g.fillStyle(shade(darkColor, 10), 0.72);
+            g.fillRoundedRect(89, cy - width * 0.58 + sway * 0.8, 6, width * 1.16, 1);
 
             g.generateTexture(`${prefix}_barrel_${idx}`, bL, bH);
         });
 
-        // --- DETAILS ---
-        g.clear(); 
-        // Tools, cables, extra tracks
-        g.lineStyle(2, 0x111111);
-        g.beginPath(); g.moveTo(10, 25); g.lineTo(90, 25); g.strokePath(); // Tow cable
-        g.fillStyle(0x333333); 
-        g.fillRect(20, 20, 10, 10); // Spare link
-        g.fillRect(35, 20, 10, 10);
+        g.clear();
+        g.lineStyle(2.2, 0x11161c, 0.95);
+        g.beginPath();
+        g.moveTo(9, 25);
+        g.lineTo(91, 25);
+        g.strokePath();
+        g.lineStyle(1.4, shade(bodyColor, -60), 0.78);
+        g.beginPath();
+        g.moveTo(16, 15);
+        g.lineTo(31, 17);
+        g.lineTo(46, 15);
+        g.lineTo(61, 18);
+        g.lineTo(78, 16);
+        g.strokePath();
+        g.fillStyle(0x2a323b, 0.95);
+        g.fillRoundedRect(18, 18, 13, 6, 2);
+        g.fillRoundedRect(37, 17, 11, 7, 2);
+        g.fillRoundedRect(55, 18, 13, 6, 2);
+        g.fillStyle(0x0b0f15, 0.95);
+        g.fillEllipse(88, 18, 10, 8);
+        g.fillEllipse(88, 31, 10, 8);
+        g.fillStyle(bodyHighlight, 0.28);
+        g.fillCircle(91, 18, 1.3);
+        g.fillCircle(91, 31, 1.3);
         g.generateTexture(`${prefix}_detail`, 100, 40);
     };
     const drawPlayerMuscleCarPart = (prefix: string, bodyColor: number, darkColor: number) => {
@@ -2016,186 +2085,205 @@ export class MainScene extends Phaser.Scene {
     };
 
     drawProj('shell_model', 16, 8, gg => {
-      gg.fillStyle(bright2(0x1a1a1a), 1);
-      gg.fillTriangle(12, 4, 4, 1, 4, 7);
-      gg.fillStyle(bright2(0x2b2b2b), 1);
-      gg.fillRect(4, 2, 7, 4);
-      gg.fillStyle(bright2(0x0a0a0a), 1);
-      gg.fillRect(11, 2, 2, 4);
-      gg.fillStyle(bright2(0x111111), 0.85);
-      gg.fillRect(2, 3, 2, 2);
-      gg.fillRect(14, 3, 1, 2);
+      gg.fillStyle(bright2(0x10151c), 1);
+      gg.fillRect(3, 2, 8, 4);
+      gg.fillStyle(bright2(0x2f3a46), 0.88);
+      gg.fillRect(4, 3, 5, 1);
+      gg.fillStyle(bright2(0xd1b178), 1);
+      gg.fillRect(3, 2, 1, 4);
+      gg.fillStyle(bright2(0x0a0e13), 1);
+      gg.fillTriangle(13, 4, 11, 2, 11, 6);
+      gg.fillStyle(bright2(0xced7e2), 0.75);
+      gg.fillRect(11, 3, 2, 1);
+      gg.fillStyle(bright2(0x0e141c), 1);
+      gg.fillRect(1, 3, 2, 2);
     });
 
     drawProj('proj_bullet', 16, 8, gg => {
-      gg.fillStyle(bright2(0x0a0a0a), 1);
-      gg.fillRect(3, 3, 10, 2);
-      gg.fillStyle(bright2(0xffcc66), 1);
-      gg.fillRect(2, 3, 1, 2);
-      gg.fillStyle(bright2(0xfff2c2), 0.9);
-      gg.fillRect(13, 3, 1, 2);
-      gg.fillStyle(bright2(0x111111), 1);
-      gg.fillRect(4, 2, 2, 1);
-      gg.fillRect(7, 5, 2, 1);
+      gg.fillStyle(bright2(0x11161b), 1);
+      gg.fillRect(3, 3, 9, 2);
+      gg.fillStyle(bright2(0xd0a869), 1);
+      gg.fillRect(2, 3, 2, 2);
+      gg.fillStyle(bright2(0xf7e3b0), 1);
+      gg.fillTriangle(13, 4, 12, 3, 12, 5);
+      gg.fillStyle(bright2(0x39414a), 0.9);
+      gg.fillRect(6, 3, 4, 1);
+      gg.fillStyle(bright2(0x0a0d12), 1);
+      gg.fillRect(1, 3, 1, 2);
     });
 
     drawProj('proj_standard', 16, 8, gg => {
-      gg.fillStyle(bright2(0x2a2a2a), 1);
-      gg.fillTriangle(12, 4, 5, 2, 5, 6);
-      gg.fillStyle(bright2(0x3a3a3a), 1);
-      gg.fillRect(5, 2, 6, 4);
-      gg.fillStyle(bright2(0xb07b3a), 1);
-      gg.fillRect(10, 2, 1, 4);
-      gg.fillStyle(bright2(0x111111), 1);
-      gg.fillRect(1, 3, 3, 2);
-      gg.fillStyle(bright2(0x0a0a0a), 1);
-      gg.fillRect(13, 3, 2, 2);
+      gg.fillStyle(bright2(0x121920), 1);
+      gg.fillRect(3, 2, 9, 4);
+      gg.fillStyle(bright2(0x37404b), 0.85);
+      gg.fillRect(5, 3, 5, 1);
+      gg.fillStyle(bright2(0xc29a63), 1);
+      gg.fillRect(4, 2, 1, 4);
+      gg.fillStyle(bright2(0x0b1016), 1);
+      gg.fillTriangle(13, 4, 11, 2, 11, 6);
+      gg.fillStyle(bright2(0xcfd8e3), 0.7);
+      gg.fillRect(11, 3, 1, 1);
+      gg.fillStyle(bright2(0x0a0d12), 1);
+      gg.fillRect(1, 3, 2, 2);
     });
 
     drawProj('proj_he', 16, 8, gg => {
-      gg.fillStyle(bright2(0x222222), 1);
-      gg.fillTriangle(12, 4, 5, 1, 5, 7);
-      gg.fillStyle(bright2(0x2a3a1f), 1);
-      gg.fillRect(5, 1, 6, 6);
-      gg.fillStyle(bright2(0xffd200), 1);
-      gg.fillRect(9, 2, 1, 4);
-      gg.fillStyle(bright2(0xaa1111), 1);
-      gg.fillRect(13, 3, 2, 2);
-      gg.fillStyle(bright2(0x0a0a0a), 1);
-      gg.fillRect(1, 2, 3, 4);
+      gg.fillStyle(bright2(0x172117), 1);
+      gg.fillRect(3, 1, 9, 6);
+      gg.fillStyle(bright2(0x263625), 0.88);
+      gg.fillRect(5, 2, 5, 1);
+      gg.fillStyle(bright2(0xf2d043), 1);
+      gg.fillRect(8, 2, 1, 4);
+      gg.fillStyle(bright2(0xff7a30), 0.9);
+      gg.fillRect(9, 3, 1, 2);
+      gg.fillStyle(bright2(0x0b120d), 1);
+      gg.fillTriangle(13, 4, 11, 2, 11, 6);
+      gg.fillStyle(bright2(0x0a0d12), 1);
+      gg.fillRect(1, 2, 2, 4);
     });
 
     drawProj('proj_ap', 16, 8, gg => {
-      gg.fillStyle(bright2(0x1a1a1a), 1);
-      gg.fillTriangle(14, 4, 6, 2, 6, 6);
-      gg.fillStyle(bright2(0x0b4b56), 1);
-      gg.fillRect(6, 3, 7, 2);
-      gg.fillStyle(bright2(0x88f3ff), 1);
-      gg.fillRect(5, 3, 1, 2);
-      gg.fillStyle(bright2(0x0a0a0a), 1);
+      gg.fillStyle(bright2(0x0f151b), 1);
+      gg.fillRect(4, 2, 8, 4);
+      gg.fillStyle(bright2(0x29566b), 0.95);
+      gg.fillRect(5, 3, 6, 1);
+      gg.fillStyle(bright2(0x9de9ff), 1);
+      gg.fillRect(4, 3, 1, 2);
+      gg.fillStyle(bright2(0x071117), 1);
+      gg.fillTriangle(14, 4, 12, 2, 12, 6);
+      gg.fillStyle(bright2(0x4f6576), 0.75);
+      gg.fillRect(11, 2, 1, 4);
+      gg.fillStyle(bright2(0x0a0d12), 1);
       gg.fillRect(1, 3, 3, 2);
-      gg.fillStyle(bright2(0x0b4b56), 1);
-      gg.fillRect(4, 2, 1, 1);
-      gg.fillRect(4, 5, 1, 1);
     });
 
     drawProj('proj_incendiary', 16, 8, gg => {
-      gg.fillStyle(bright2(0x1a0a06), 1);
-      gg.fillTriangle(12, 4, 5, 2, 5, 6);
-      gg.fillStyle(bright2(0x2a1410), 1);
-      gg.fillRect(5, 2, 6, 4);
-      gg.fillStyle(bright2(0xff5a00), 1);
+      gg.fillStyle(bright2(0x20100a), 1);
+      gg.fillRect(3, 2, 9, 4);
+      gg.fillStyle(bright2(0x4c1f10), 0.9);
+      gg.fillRect(5, 3, 5, 1);
+      gg.fillStyle(bright2(0xff6a18), 1);
       gg.fillRect(8, 2, 1, 4);
-      gg.fillStyle(bright2(0xffcc00), 0.8);
+      gg.fillStyle(bright2(0xffd157), 0.9);
       gg.fillRect(9, 3, 1, 2);
-      gg.fillStyle(bright2(0x0a0a0a), 1);
-      gg.fillRect(1, 3, 3, 2);
+      gg.fillStyle(bright2(0x0f0906), 1);
+      gg.fillTriangle(13, 4, 11, 2, 11, 6);
       gg.fillStyle(bright2(0x111111), 1);
-      gg.fillRect(13, 3, 2, 2);
+      gg.fillRect(1, 3, 2, 2);
     });
 
     drawProj('proj_mortar', 16, 8, gg => {
-      gg.fillStyle(bright2(0x0b0b0b), 1);
-      gg.fillEllipse(8, 4, 12, 6);
-      gg.fillStyle(bright2(0x1b1b1b), 1);
-      gg.fillEllipse(7, 4, 10, 5);
-      gg.fillStyle(bright2(0x2a2a2a), 1);
+      gg.fillStyle(bright2(0x10151a), 1);
+      gg.fillEllipse(8, 4, 11, 6);
+      gg.fillStyle(bright2(0x27303a), 0.9);
+      gg.fillEllipse(7, 4, 8, 4);
+      gg.fillStyle(bright2(0xced7e2), 0.65);
+      gg.fillRect(8, 3, 2, 1);
+      gg.fillStyle(bright2(0x0b0f14), 1);
       gg.fillRect(12, 2, 2, 4);
-      gg.fillStyle(bright2(0x111111), 1);
+      gg.fillStyle(bright2(0x0a0d12), 1);
       gg.fillRect(2, 3, 2, 2);
-      gg.fillStyle(bright2(0x777777), 0.55);
-      gg.fillRect(5, 3, 1, 2);
     });
 
     drawProj('proj_nuke', 48, 24, gg => {
-      gg.fillStyle(bright2(0x111111), 1);
+      gg.fillStyle(bright2(0x0f1115), 1);
       gg.fillEllipse(23, 12, 44, 18);
-      gg.fillStyle(bright2(0x2b2b2b), 1);
-      gg.fillEllipse(22, 12, 40, 15);
+      gg.fillStyle(bright2(0x262f3a), 1);
+      gg.fillEllipse(22, 12, 39, 14);
+      gg.fillStyle(bright2(0x141b24), 1);
+      gg.fillCircle(38, 12, 8);
+      gg.fillStyle(bright2(0x3d4a57), 0.84);
+      gg.fillCircle(36, 11, 5);
 
-      gg.fillStyle(bright2(0x1a1a1a), 1);
-      gg.fillCircle(39, 12, 8);
-      gg.fillStyle(bright2(0x3a3a3a), 0.9);
-      gg.fillCircle(37, 11, 6);
-
-      gg.fillStyle(bright2(0x0b0b0b), 1);
+      gg.fillStyle(bright2(0x0a0d12), 1);
       gg.fillTriangle(5, 12, 15, 4, 15, 20);
       gg.fillRect(14, 8, 8, 8);
+      gg.fillStyle(bright2(0x1c242d), 0.95);
+      gg.fillTriangle(14, 6, 14, 10, 7, 8);
+      gg.fillTriangle(14, 14, 14, 18, 7, 16);
+      gg.fillTriangle(14, 12, 9, 10, 9, 14);
 
-      gg.fillStyle(bright2(0x101010), 1);
-      gg.fillTriangle(14, 6, 14, 10, 6, 8);
-      gg.fillTriangle(14, 14, 14, 18, 6, 16);
-      gg.fillTriangle(14, 12, 8, 10, 8, 14);
-
-      gg.fillStyle(bright2(0xf2d24b), 1);
-      gg.fillRect(24, 4, 3, 16);
-      gg.fillStyle(bright2(0x0a0a0a), 0.55);
-      gg.fillRect(29, 5, 2, 14);
-      gg.fillStyle(bright2(0xffffff), 0.12);
-      gg.fillRect(30, 7, 10, 2);
+      gg.fillStyle(bright2(0xf0d05d), 1);
+      gg.fillRect(23, 4, 3, 16);
+      gg.fillStyle(bright2(0x0a0a0a), 0.62);
+      gg.fillRect(28, 5, 2, 14);
+      gg.fillStyle(bright2(0xf9fcff), 0.18);
+      gg.fillRect(31, 7, 8, 2);
+      gg.fillStyle(bright2(0xa2b3c4), 0.6);
+      gg.fillRect(32, 13, 6, 1);
     });
 
     drawProj('proj_missile', 16, 8, gg => {
-      gg.fillStyle(0x202020, 1);
+      gg.fillStyle(bright2(0x151a22), 1);
       gg.fillRect(3, 2, 9, 4);
-      gg.fillStyle(0x0a0a0a, 1);
+      gg.fillStyle(bright2(0x2e3743), 0.9);
+      gg.fillRect(5, 3, 5, 1);
+      gg.fillStyle(bright2(0x0a0f15), 1);
       gg.fillTriangle(13, 4, 12, 2, 12, 6);
-      gg.fillStyle(0xff3300, 1);
+      gg.fillStyle(bright2(0xff4b1f), 1);
       gg.fillRect(2, 3, 1, 2);
-      gg.fillStyle(0xffaa00, 0.75);
+      gg.fillStyle(bright2(0xffb057), 0.82);
       gg.fillRect(1, 3, 1, 2);
-      gg.fillStyle(0x333333, 1);
+      gg.fillStyle(bright2(0x3b444f), 1);
       gg.fillRect(6, 1, 1, 1);
       gg.fillRect(6, 6, 1, 1);
     });
 
     drawProj('proj_rpg', 16, 8, gg => {
-      gg.fillStyle(0x1b1b1b, 1);
+      gg.fillStyle(bright2(0x171b1e), 1);
       gg.fillRect(3, 2, 8, 4);
-      gg.fillStyle(0x0a0a0a, 1);
-      gg.fillTriangle(12, 4, 11, 2, 11, 6);
-      gg.fillStyle(0x6f7b4e, 1);
+      gg.fillStyle(bright2(0x667150), 1);
       gg.fillRect(4, 3, 5, 2);
-      gg.fillStyle(0xd6b25a, 1);
+      gg.fillStyle(bright2(0xc9a35a), 1);
       gg.fillRect(9, 2, 1, 4);
-      gg.fillStyle(0x111111, 1);
+      gg.fillStyle(bright2(0x0a0f14), 1);
+      gg.fillTriangle(12, 4, 11, 2, 11, 6);
+      gg.fillStyle(bright2(0x0b0f13), 1);
       gg.fillRect(1, 3, 2, 2);
+      gg.fillStyle(bright2(0xcdd7e0), 0.65);
+      gg.fillRect(10, 3, 1, 1);
     });
 
     drawProj('proj_torpedo', 16, 8, gg => {
-      gg.fillStyle(0x0b1b2a, 1);
+      gg.fillStyle(bright2(0x0c1c2f), 1);
       gg.fillRect(3, 2, 9, 4);
-      gg.fillStyle(0x0a0a0a, 1);
-      gg.fillTriangle(13, 4, 12, 2, 12, 6);
-      gg.fillStyle(0x33bbff, 1);
+      gg.fillStyle(bright2(0x1d2e42), 0.95);
+      gg.fillRect(5, 3, 5, 1);
+      gg.fillStyle(bright2(0x44d2ff), 1);
       gg.fillRect(7, 2, 1, 4);
-      gg.fillStyle(0x111111, 1);
+      gg.fillStyle(bright2(0x08131f), 1);
+      gg.fillTriangle(13, 4, 12, 2, 12, 6);
+      gg.fillStyle(bright2(0x102233), 1);
       gg.fillRect(2, 3, 1, 2);
       gg.fillRect(11, 3, 1, 2);
     });
 
     drawProj('proj_canister', 16, 8, gg => {
-      gg.fillStyle(0x2a1a0f, 1);
+      gg.fillStyle(bright2(0x241a11), 1);
       gg.fillRect(4, 2, 8, 4);
-      gg.fillStyle(0xffcc66, 1);
+      gg.fillStyle(bright2(0xffcf78), 0.95);
       gg.fillRect(5, 3, 6, 2);
-      gg.fillStyle(0x0a0a0a, 1);
+      gg.fillStyle(bright2(0x8a6538), 0.8);
+      gg.fillRect(6, 2, 1, 4);
+      gg.fillStyle(bright2(0x0b1015), 1);
       gg.fillRect(12, 2, 2, 4);
-      gg.fillStyle(0x111111, 1);
+      gg.fillStyle(bright2(0x111111), 1);
       gg.fillRect(2, 3, 2, 2);
     });
 
     drawProj('proj_cluster', 16, 8, gg => {
-      gg.fillStyle(0x1a0f06, 1);
-      gg.fillTriangle(12, 4, 6, 2, 6, 6);
-      gg.fillStyle(0x3a1a08, 1);
-      gg.fillRect(6, 2, 5, 4);
-      gg.fillStyle(0xffaa00, 1);
+      gg.fillStyle(bright2(0x22120a), 1);
+      gg.fillRect(4, 2, 8, 4);
+      gg.fillStyle(bright2(0x3f1d0d), 0.92);
+      gg.fillRect(6, 3, 4, 1);
+      gg.fillStyle(bright2(0xffb048), 1);
       gg.fillRect(8, 2, 1, 4);
-      gg.fillStyle(0x0a0a0a, 1);
-      gg.fillRect(2, 3, 3, 2);
-      gg.fillStyle(0x111111, 1);
-      gg.fillRect(13, 3, 2, 2);
+      gg.fillStyle(bright2(0x0d0f12), 1);
+      gg.fillTriangle(13, 4, 11, 2, 11, 6);
+      gg.fillStyle(bright2(0x111111), 1);
+      gg.fillRect(2, 3, 2, 2);
+      gg.fillStyle(bright2(0xffde9d), 0.62);
+      gg.fillRect(10, 3, 1, 1);
     });
 
     const makeHead = (key: string, faction: 'ally' | 'enemy' | 'neutral', emotion: "neutral" | "angry" | "scared" | "dead") => {
@@ -2483,27 +2571,27 @@ export class MainScene extends Phaser.Scene {
     g.clear(); g.fillStyle(0xffffff, 0.95); g.fillCircle(16, 16, 6); g.fillStyle(0xfff2cc, 0.55); g.fillCircle(16, 16, 11); g.fillStyle(0xffcc66, 0.25); g.fillCircle(16, 16, 15); g.generateTexture('spark_hd', 32, 32);
     if (!this.textures.exists('fx_soft_glow')) {
       g.clear();
-      const glowSize = 64;
+      const glowSize = 96;
       const glowR = glowSize * 0.5;
-      for (let i = 0; i < 18; i++) {
-        const t = 1 - i / 17;
-        const a = Math.pow(t, 2.2) * 0.18;
+      for (let i = 0; i < 26; i++) {
+        const t = 1 - i / 25;
+        const a = Math.pow(t, 2.0) * 0.15;
         g.fillStyle(0xffffff, a);
         g.fillCircle(glowR, glowR, glowR * t);
       }
       g.generateTexture('fx_soft_glow', glowSize, glowSize);
     }
     if (!this.textures.exists('fx_soft_ring')) {
-      const ringSize = 96;
+      const ringSize = 128;
       const ringTexture = this.textures.createCanvas('fx_soft_ring', ringSize, ringSize);
       const ctx = ringTexture.getContext();
       const rr = ringSize * 0.5;
       ctx.clearRect(0, 0, ringSize, ringSize);
-      for (let i = 0; i < 34; i++) {
-        const t = i / 33;
+      for (let i = 0; i < 42; i++) {
+        const t = i / 41;
         const radius = rr * (0.24 + t * 0.56);
-        const width = 2.5 + (1 - t) * 9;
-        const alpha = Math.pow(1 - t, 2.2) * 0.17;
+        const width = 2.4 + (1 - t) * 7.8;
+        const alpha = Math.pow(1 - t, 2.3) * 0.15;
         ctx.beginPath();
         ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(4)})`;
         ctx.lineWidth = width;
@@ -2584,6 +2672,9 @@ export class MainScene extends Phaser.Scene {
 
       texture?.refresh?.();
     };
+    softenTextureEdges('fx_soft_glow', 0.9);
+    softenTextureEdges('fx_soft_ring', 0.7);
+    softenTextureEdges('fx_vignette_soft', 0.45);
     for (let i = 0; i < 10; i++) {
       const r = makeRand(1337 + i * 97);
       const w = 90 + Math.floor(r() * 60);
@@ -2676,25 +2767,94 @@ export class MainScene extends Phaser.Scene {
     }
     
     const sunY = 320 + atmosphereOffsetY;
-    if (this.mapId === 'desert') {
-        this.add.circle(1000, sunY, 190, 0xffeb3b, 1).setScrollFactor(0.002).setDepth(2);
-        this.add.circle(1000, sunY, 300, 0xffc107, 0.32).setScrollFactor(0.002).setDepth(1.5);
+    const sunX = 1000;
+    const desert = this.mapId === 'desert';
+    const sunRay = this.add.graphics().setScrollFactor(0.002).setDepth(1.55);
+    const rayCount = desert ? 16 : 18;
+    const rayInner = desert ? 164 : 132;
+    const rayOuter = desert ? 338 : 304;
+    const rayColor = desert ? 0xffc56b : 0xff9f68;
+    sunRay.fillStyle(rayColor, desert ? 0.11 : 0.1);
+    for (let i = 0; i < rayCount; i++) {
+      const a = (i / rayCount) * Math.PI * 2 + ((i % 2 === 0) ? 0.018 : -0.032);
+      const spread = desert ? Math.PI / 20 : Math.PI / 22;
+      const x0 = sunX + Math.cos(a - spread) * rayInner;
+      const y0 = sunY + Math.sin(a - spread) * rayInner;
+      const x1 = sunX + Math.cos(a + spread) * rayInner;
+      const y1 = sunY + Math.sin(a + spread) * rayInner;
+      const x2 = sunX + Math.cos(a) * rayOuter;
+      const y2 = sunY + Math.sin(a) * rayOuter;
+      sunRay.beginPath();
+      sunRay.moveTo(x0, y0);
+      sunRay.lineTo(x2, y2);
+      sunRay.lineTo(x1, y1);
+      sunRay.closePath();
+      sunRay.fillPath();
+    }
+    const sunGlow = this.add.graphics().setScrollFactor(0.002).setDepth(1.78);
+    if (desert) {
+      sunGlow.fillStyle(0xffd27e, 0.36);
+      sunGlow.fillCircle(sunX, sunY, 286);
+      sunGlow.fillStyle(0xffb74f, 0.22);
+      sunGlow.fillCircle(sunX, sunY, 236);
+      sunGlow.fillStyle(0xfff1bd, 0.12);
+      sunGlow.fillEllipse(sunX - 18, sunY - 20, 220, 150);
     } else {
-        // Enhanced Sun for Forest
-        const sunX = 1000;
-        this.add.circle(sunX, sunY, 140, 0xffaa66, 1).setScrollFactor(0.002).setDepth(2); // Core
-        this.add.circle(sunX, sunY, 220, 0xff8844, 0.4).setScrollFactor(0.002).setDepth(1.8); // Inner Glow
-        this.add.circle(sunX, sunY, 380, 0xff5522, 0.15).setScrollFactor(0.002).setDepth(1.5); // Outer Glow
-        
-        // Fog Layers
-        const fogColor = 0xcce0ff;
-        const fog1 = this.add.graphics().setScrollFactor(0.1).setDepth(4).setAlpha(0.12);
-        fog1.fillGradientStyle(0xffffff, 0xffffff, fogColor, fogColor, 0, 0, 0.8, 0.8);
-        fog1.fillRect(-2000, 200, 14000, 1200);
-        
-        const fog2 = this.add.graphics().setScrollFactor(0.25).setDepth(18).setAlpha(0.08);
-        fog2.fillGradientStyle(0xffffff, 0xffffff, fogColor, fogColor, 0, 0, 0.5, 0.5);
-        fog2.fillRect(-2000, 400, 14000, 1000);
+      sunGlow.fillStyle(0xffa86c, 0.34);
+      sunGlow.fillCircle(sunX, sunY, 232);
+      sunGlow.fillStyle(0xff8f58, 0.2);
+      sunGlow.fillCircle(sunX, sunY, 318);
+      sunGlow.fillStyle(0xfff2ca, 0.12);
+      sunGlow.fillEllipse(sunX - 14, sunY - 16, 176, 132);
+    }
+    const sunCore = this.add.graphics().setScrollFactor(0.002).setDepth(2);
+    if (desert) {
+      sunCore.fillStyle(0xfff4be, 0.98);
+      sunCore.fillCircle(sunX, sunY, 182);
+      sunCore.fillStyle(0xffd873, 0.72);
+      sunCore.fillCircle(sunX, sunY, 142);
+      sunCore.fillStyle(0xfff9de, 0.32);
+      sunCore.fillCircle(sunX - 22, sunY - 26, 72);
+    } else {
+      sunCore.fillStyle(0xffd2a1, 0.98);
+      sunCore.fillCircle(sunX, sunY, 138);
+      sunCore.fillStyle(0xff9e63, 0.78);
+      sunCore.fillCircle(sunX, sunY, 108);
+      sunCore.fillStyle(0xfff7e0, 0.3);
+      sunCore.fillCircle(sunX - 18, sunY - 20, 56);
+    }
+
+    if (!desert) {
+      const fogColor = 0xcce0ff;
+      const makeRand = (seed: number) => {
+        let t = seed >>> 0;
+        return () => {
+          t += 0x6d2b79f5;
+          let x = t;
+          x = Math.imul(x ^ (x >>> 15), x | 1);
+          x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+          return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+        };
+      };
+      const paintFogLayer = (depth: number, scroll: number, alpha: number, y: number, h: number, seed: number) => {
+        const fog = this.add.graphics().setScrollFactor(scroll).setDepth(depth).setAlpha(alpha);
+        const span = Math.max(this.WORLD_WIDTH * 2.8, 36000);
+        const left = -span * 0.65;
+        const width = span * 1.3;
+        fog.fillGradientStyle(0xffffff, 0xffffff, fogColor, fogColor, 0, 0, 0.72, 0.72);
+        fog.fillRect(left, y, width, h);
+        const rnd = makeRand(seed);
+        for (let i = 0; i < 34; i++) {
+          const ex = left + ((i + 0.5) / 34) * width + (rnd() - 0.5) * 420;
+          const ey = y + h * (0.22 + rnd() * 0.7);
+          const ew = 380 + rnd() * 920;
+          const eh = 110 + rnd() * 260;
+          fog.fillStyle(rnd() > 0.55 ? 0xffffff : fogColor, 0.06 + rnd() * 0.07);
+          fog.fillEllipse(ex, ey, ew, eh);
+        }
+      };
+      paintFogLayer(4, 0.08, 0.13, 140, 1500, 19681);
+      paintFogLayer(18, 0.22, 0.09, 330, 1250, 28411);
     }
   }
 
@@ -6228,7 +6388,7 @@ export class MainScene extends Phaser.Scene {
     const visualScale = (shellType === ShellType.HE || shellType === ShellType.INCENDIARY || shellType === ShellType.MORTAR || shellType === ShellType.STANDARD) ? 0.2 : 1.0;
     const scaledVisualRadius = radius * visualScale;
     const baseShake = shellType === ShellType.MORTAR ? 0.15 : (shellType === ShellType.HE ? 0.05 : (shellType === ShellType.STANDARD ? 0.035 : (shellType === ShellType.INCENDIARY ? 0.03 : (isDirectTankHit ? 0.015 : 0.008))));
-    const shakeIntensity = baseShake * 0.75;
+    const shakeIntensity = baseShake * 0.62;
 
     this.cameras.main.shake(500, shakeIntensity);
     const effectRadius = scaledVisualRadius * 0.5;
@@ -6725,7 +6885,7 @@ export class MainScene extends Phaser.Scene {
       this.time.delayedCall(12000, () => this.audio.stopLoop('p_nuke_aftermath', 2500));
     }
 
-    this.cameras.main.shake(1400, 0.16);
+    this.cameras.main.shake(1400, 0.135);
     this.particles.createNukeExplosion(x, detY, craterRadius);
 
     const centerIdx = Math.round(x / this.TERRAIN_STEP);

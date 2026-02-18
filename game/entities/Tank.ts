@@ -4384,7 +4384,7 @@ export class LandSubmarine extends Phaser.Physics.Arcade.Sprite {
       }
       const surfaceY = this.lake?.waterY ?? this.sceneRef.getWaterSurfaceY(cx) ?? this.sceneRef.getTerrainHeight(cx);
       this.sceneRef.requestHitStop(180);
-      this.sceneRef.cameras.main.shake(700, 0.06);
+      this.sceneRef.cameras.main.shake(700, 0.048);
       this.sceneRef.particles.createWaterSplash(cx, surfaceY + 2, 900);
 
       const bubble = this.sceneRef.add.particles(cx, Math.max(surfaceY + 20, cy), 'spark', {
@@ -4439,7 +4439,7 @@ export class LandSubmarine extends Phaser.Physics.Arcade.Sprite {
     this.sceneRef.triggerExplosion(cx, fxY, radius, dmg, false, fxType, this, 'vehicle');
 
     this.sceneRef.requestHitStop(fxType === ShellType.AP ? 160 : 260);
-    this.sceneRef.cameras.main.shake(900, fxType === ShellType.AP ? 0.055 : 0.095);
+    this.sceneRef.cameras.main.shake(900, fxType === ShellType.AP ? 0.046 : 0.078);
 
     this.sceneRef.particles.createSmallSpark(cx + Phaser.Math.Between(-40, 40), cy + Phaser.Math.Between(-30, 30));
     if (fxType === ShellType.AP) this.sceneRef.particles.createVehicleExplosion(cx, fxY, radius * 0.55);
